@@ -1,16 +1,30 @@
-# mobile
+# FoodScan mobile app
 
-A new Flutter project.
+## Local development
 
-## Getting Started
+Start the API and PostgreSQL using the instructions in `../backend/README.md`.
+Then, from this directory, run:
 
-This project is a starting point for a Flutter application.
+```bash
+flutter pub get
+flutter run -d chrome
+```
 
-A few resources to get you started if this is your first Flutter project:
+The default web API URL is `http://127.0.0.1:8000`. Override it with
+`--dart-define=FOODSCAN_API_BASE_URL=http://YOUR_COMPUTER_LAN_IP:8000` when
+running on a physical phone. Android emulators default to `http://10.0.2.2:8000`.
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+On first launch, select a wellness goal. FoodScan saves it through the profile
+API and reloads it from the backend on later launches. The profile API uses a
+single unauthenticated local development profile; do not expose it to real
+users or deploy it until authentication and per-user ownership are implemented.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+The scanner and diary are interface entry points only; food scanning and diary
+records are planned for later milestones.
+
+Run mobile tests and static analysis with:
+
+```bash
+flutter test
+flutter analyze
+```

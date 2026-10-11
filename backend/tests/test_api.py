@@ -46,6 +46,24 @@ def test_profile_rejects_negative_goals(client):
     assert response.status_code == 422
 
 
+def test_profile_goal_is_saved_and_validated(client):
+    saved = client.put(
+        "/api/v1/me/profile",
+        json={"goal": "fat_loss"},
+    )
+    assert saved.status_code == 200
+    assert saved.json()["goal"] == "fat_loss"
+
+    fetched = client.get("/api/v1/me")
+    assert fetched.json()["goal"] == "fat_loss"
+
+    rejected = client.put(
+        "/api/v1/me/profile",
+        json={"goal": "extreme_diet"},
+    )
+    assert rejected.status_code == 422
+
+
 def test_product_not_found_returns_404(client):
     response = client.get(f"/api/v1/products/{uuid4()}")
 

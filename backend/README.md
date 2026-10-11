@@ -28,7 +28,9 @@ Open `http://127.0.0.1:8000/docs` for the interactive API docs and
 
 The profile endpoints currently operate on one local development profile and
 are not authenticated. Add authentication before exposing profile data to
-multiple users or deploying the API.
+multiple users or deploying the API. Supported wellness goals are `fat_loss`,
+`muscle_gain`, and `maintenance`; this value does not prescribe calorie or
+medical targets.
 
 ## Tests
 

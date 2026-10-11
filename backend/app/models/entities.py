@@ -39,9 +39,16 @@ product_ingredients = Table(
 
 class UserProfile(Base):
     __tablename__ = "user_profiles"
+    __table_args__ = (
+        CheckConstraint(
+            "goal IS NULL OR goal IN ('fat_loss', 'muscle_gain', 'maintenance')",
+            name="ck_user_profiles_goal",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(100))
+    goal: Mapped[Optional[str]] = mapped_column(String(30))
     daily_calorie_goal: Mapped[Optional[int]] = mapped_column(Integer)
     daily_protein_goal_g: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
     daily_carbohydrate_goal_g: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
