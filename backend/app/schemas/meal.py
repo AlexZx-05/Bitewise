@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -135,8 +136,24 @@ class ConfirmedMealComponent(BaseModel):
     fdc_id: int = Field(gt=0)
     food_name: str = Field(min_length=1, max_length=200)
     portion_g: Decimal = Field(gt=0, le=5000)
+    portion_pieces: Optional[Decimal] = Field(default=None, gt=0, le=100)
+    grams_per_piece: Optional[Decimal] = Field(default=None, gt=0, le=5000)
     ingredients: list[str] = Field(default_factory=list, max_length=50)
     cooking_method: str = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def validate_piece_portion(self):
+        if (self.portion_pieces is None) != (self.grams_per_piece is None):
+            raise ValueError(
+                "Specify both the number of pieces and grams per piece."
+            )
+        if (
+            self.portion_pieces is not None
+            and self.grams_per_piece is not None
+            and self.portion_pieces * self.grams_per_piece != self.portion_g
+        ):
+            raise ValueError("Piece count and weight must match the total portion.")
+        return self
 
     @field_validator("food_name", "cooking_method")
     @classmethod
@@ -146,6 +163,9 @@ class ConfirmedMealComponent(BaseModel):
 
 class MealScanConfirm(BaseModel):
     meal_name: str = Field(min_length=1, max_length=200)
+    meal_type: str = Field(
+        default="snack", pattern="^(breakfast|lunch|dinner|snack)$"
+    )
     components: list[ConfirmedMealComponent] = Field(min_length=1, max_length=10)
 
     @field_validator("meal_name")
@@ -157,6 +177,8 @@ class MealScanConfirm(BaseModel):
 class MealComponentRead(BaseModel):
     food_name: str
     portion_g: Decimal
+    portion_pieces: Optional[Decimal] = None
+    grams_per_piece: Optional[Decimal] = None
     ingredients: list[str]
     cooking_method: str
     fdc_id: int
@@ -167,8 +189,15 @@ class MealComponentRead(BaseModel):
 class MealScanRead(BaseModel):
     scan_id: str
     status: str
+    meal_type: str
+    created_at: datetime
     meal_name: str
     components: list[MealComponentRead]
     nutrition_totals: dict[str, Decimal]
     goal_explanation: str
     alternative_guidance: str
+
+
+class MealDiaryRead(BaseModel):
+    date: date
+    meals: list[MealScanRead]

@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../profile/data/profile.dart';
 import '../../profile/data/profile_repository.dart';
+import '../../scanner/data/meal_scan_repository.dart';
+import 'meal_dashboard_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -22,14 +24,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _HomeContent(
         onScanner: () => context.push('/scan'),
         onPackagedScan: () => context.push('/scan/packaged'),
-        onMealScan: () => context.push('/scan/meal'),
+        onMealScan: () => _openMeal(),
       ),
-      const _EmptySection(
-        icon: Icons.menu_book_outlined,
-        title: 'Your food diary',
-        description:
-            'Your food activity will appear here after scanning is added.',
-      ),
+      MealDashboardScreen(onAddMeal: (mealType) => _openMeal(mealType)),
       const _ProfileSection(),
     ];
 
@@ -53,6 +50,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _openMeal([String? mealType]) async {
+    final path = mealType == null ? '/scan/meal' : '/scan/meal?type=$mealType';
+    final saved = await context.push<bool>(path);
+    if (saved == true) {
+      ref.invalidate(mealDiaryProvider(todayMealDiaryKey()));
+    }
   }
 }
 
@@ -273,7 +278,7 @@ class _EmptyActivity extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'Your scans will appear here. Start with a food label when scanning is available.',
+                'Review saved meals and today’s nutrition in the Diary tab.',
                 style: TextStyle(
                   color: AppTheme.charcoal.withValues(alpha: 0.72),
                   height: 1.35,

@@ -155,6 +155,9 @@ class MealScanDetails(Base):
     scan_id: Mapped[UUID] = mapped_column(
         ForeignKey("food_scans.id", ondelete="CASCADE"), primary_key=True
     )
+    meal_type: Mapped[str] = mapped_column(
+        String(20), default="snack", server_default="snack"
+    )
     meal_name: Mapped[str] = mapped_column(String(200))
     components: Mapped[list[dict[str, object]]] = mapped_column(JSON)
     nutrition_totals: Mapped[dict[str, object]] = mapped_column(JSON)

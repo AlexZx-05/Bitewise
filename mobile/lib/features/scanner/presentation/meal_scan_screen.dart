@@ -8,7 +8,9 @@ import '../../profile/data/profile_repository.dart';
 import '../data/meal_scan_repository.dart';
 
 class MealScanScreen extends ConsumerStatefulWidget {
-  const MealScanScreen({super.key});
+  const MealScanScreen({this.initialMealType = 'lunch', super.key});
+
+  final String initialMealType;
 
   @override
   ConsumerState<MealScanScreen> createState() => _MealScanScreenState();
@@ -20,8 +22,16 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
   final List<_MealComponentDraft> _components = [];
   XFile? _photo;
   MealScanResult? _result;
+  String _mealType = 'lunch';
   String? _message;
+  bool _messageIsError = false;
   bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _mealType = widget.initialMealType;
+  }
 
   @override
   void dispose() {
@@ -37,22 +47,25 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
     _components.clear();
   }
 
-  Future<void> _pickPhoto() async {
+  Future<void> _pickPhoto(ImageSource source) async {
     try {
       final photo = await _picker.pickImage(
-        source: ImageSource.gallery,
+        source: source,
         imageQuality: 82,
         maxWidth: 1800,
       );
       if (photo != null && mounted) {
+        _clearComponents();
         setState(() {
           _photo = photo;
+          _mealName.clear();
           _message = null;
+          _messageIsError = false;
         });
       }
     } catch (error) {
       if (mounted) {
-        setState(() => _message = 'Could not open photo picker: $error');
+        _showMessage('Could not open photo picker: $error', isError: true);
       }
     }
   }
@@ -65,6 +78,7 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
     setState(() {
       _busy = true;
       _message = 'Identifying visible meal components…';
+      _messageIsError = false;
     });
     try {
       final extracted = await ref
@@ -99,10 +113,11 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
       setState(() {
         _message =
             'These are AI suggestions, not verified facts. Confirm the dish, ingredients, cooking method, and portion before nutrition lookup.';
+        _messageIsError = false;
       });
     } on FoodScanApiException catch (error) {
       if (mounted) {
-        setState(() => _message = error.message);
+        _showMessage(error.message, isError: true);
       }
     } finally {
       if (mounted) {
@@ -116,7 +131,15 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
     String? query,
   }) async {
     final searchTerm = (query ?? component.foodName.text).trim();
-    if (searchTerm.length < 2 || component.searching) {
+    if (component.searching) {
+      return;
+    }
+    if (searchTerm.length < 2) {
+      _showMessage(
+        'Enter at least two characters for the food name before searching USDA.',
+        item: component,
+        isError: true,
+      );
       return;
     }
     setState(() {
@@ -147,6 +170,7 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
           component.searchError = error.message;
           component.noMatches = false;
         });
+        _showMessage(error.message, isError: true);
       }
     } finally {
       if (mounted) {
@@ -173,21 +197,62 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
     if (_busy) {
       return;
     }
-    if (_mealName.text.trim().isEmpty || _components.isEmpty) {
-      setState(
-        () => _message = 'Confirm the meal name and at least one food item.',
-      );
+    if (_mealName.text.trim().isEmpty) {
+      _showMessage('Add a meal name before saving.', isError: true);
       return;
     }
-    for (final item in _components) {
-      if (item.foodName.text.trim().isEmpty ||
-          double.tryParse(item.portionG.text.trim()) == null ||
-          double.parse(item.portionG.text.trim()) <= 0 ||
-          item.selectedFood == null ||
-          item.cookingMethod.text.trim().isEmpty) {
-        setState(
-          () => _message =
-              'For each item, confirm its name, portion in grams, cooking method, and USDA food match.',
+    if (_components.isEmpty) {
+      _showMessage('Add at least one food item before saving.', isError: true);
+      return;
+    }
+    for (var index = 0; index < _components.length; index++) {
+      final item = _components[index];
+      final pieces = double.tryParse(item.pieces.text.trim());
+      final gramsPerPiece = double.tryParse(item.gramsPerPiece.text.trim());
+      if (item.foodName.text.trim().isEmpty) {
+        _showMessage(
+          'Enter a name for food item ${index + 1}.',
+          item: item,
+          isError: true,
+        );
+        return;
+      }
+      final portion = double.tryParse(item.portionG.text.trim());
+      if (portion == null || portion <= 0) {
+        _showMessage(
+          'Enter a valid portion in grams for ${item.foodName.text.trim()}.',
+          item: item,
+          isError: true,
+        );
+        return;
+      }
+      if (item.cookingMethod.text.trim().isEmpty) {
+        _showMessage(
+          'Confirm the cooking method for ${item.foodName.text.trim()}.',
+          item: item,
+          isError: true,
+        );
+        return;
+      }
+      if ((item.pieces.text.trim().isNotEmpty ||
+              item.gramsPerPiece.text.trim().isNotEmpty) &&
+          (pieces == null ||
+              gramsPerPiece == null ||
+              pieces <= 0 ||
+              gramsPerPiece <= 0 ||
+              (pieces * gramsPerPiece - portion).abs() > 0.1)) {
+        _showMessage(
+          'For ${item.foodName.text.trim()}, enter both pieces and grams per piece. Their total must match the portion in grams.',
+          item: item,
+          isError: true,
+        );
+        return;
+      }
+      if (item.selectedFood == null) {
+        _showMessage(
+          'Choose a nutrition result for food item ${index + 1}. Tap “Find nutrition info” and select the closest match.',
+          item: item,
+          isError: true,
         );
         return;
       }
@@ -196,16 +261,24 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
     setState(() {
       _busy = true;
       _message = 'Calculating from selected USDA food records…';
+      _messageIsError = false;
     });
     try {
       final result = await ref.read(mealScanRepositoryProvider).confirmMeal({
         'meal_name': _mealName.text.trim(),
+        'meal_type': _mealType,
         'components': _components
             .map(
               (item) => {
                 'fdc_id': item.selectedFood!.fdcId,
                 'food_name': item.foodName.text.trim(),
                 'portion_g': double.parse(item.portionG.text.trim()),
+                if (item.pieces.text.trim().isNotEmpty)
+                  'portion_pieces': double.parse(item.pieces.text.trim()),
+                if (item.gramsPerPiece.text.trim().isNotEmpty)
+                  'grams_per_piece': double.parse(
+                    item.gramsPerPiece.text.trim(),
+                  ),
                 'ingredients': item.ingredients.text
                     .split(RegExp(r'[\n,;]'))
                     .map((part) => part.trim())
@@ -217,16 +290,64 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
             .toList(),
       });
       if (mounted) {
+        ref.invalidate(mealDiaryProvider(todayMealDiaryKey()));
         setState(() => _result = result);
       }
     } on FoodScanApiException catch (error) {
       if (mounted) {
-        setState(() => _message = error.message);
+        _showMessage(error.message, isError: true);
       }
     } finally {
       if (mounted) {
         setState(() => _busy = false);
       }
+    }
+  }
+
+  void _showMessage(
+    String message, {
+    _MealComponentDraft? item,
+    bool isError = false,
+  }) {
+    if (!mounted) return;
+    setState(() {
+      _message = message;
+      _messageIsError = isError;
+    });
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: isError ? Theme.of(context).colorScheme.error : null,
+        ),
+      );
+    if (item != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final itemContext = item.cardKey.currentContext;
+        if (itemContext != null) {
+          Scrollable.ensureVisible(
+            itemContext,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            alignment: 0.12,
+          );
+        }
+      });
+    }
+  }
+
+  void _updatePieceWeight(_MealComponentDraft item) {
+    final pieces = double.tryParse(item.pieces.text.trim());
+    final gramsPerPiece = double.tryParse(item.gramsPerPiece.text.trim());
+    if (pieces != null &&
+        gramsPerPiece != null &&
+        pieces > 0 &&
+        gramsPerPiece > 0) {
+      setState(
+        () => item.portionG.text = (pieces * gramsPerPiece).toStringAsFixed(1),
+      );
     }
   }
 
@@ -237,6 +358,7 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
       _photo = null;
       _mealName.clear();
       _message = null;
+      _messageIsError = false;
     });
   }
 
@@ -264,6 +386,9 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
   }
 
   Widget _buildFlow() {
+    final matchedCount = _components
+        .where((component) => component.selectedFood != null)
+        .length;
     return ListView(
       padding: const EdgeInsets.all(22),
       children: [
@@ -276,13 +401,50 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
         ),
         const SizedBox(height: 8),
         const Text(
-          'The meal photo is sent to FoodScan and Groq for suggested dish identification. Confirm ingredients and portions; the image is not saved by FoodScan.',
+          'Choose a meal type and photo. Groq suggests visible foods; review every item and portion before nutrition is calculated from USDA records. Food photos are not saved.',
         ),
         const SizedBox(height: 16),
-        OutlinedButton.icon(
-          onPressed: _busy ? null : _pickPhoto,
-          icon: const Icon(Icons.add_a_photo_outlined),
-          label: Text(_photo == null ? 'Choose meal photo' : 'Change photo'),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final type in const {
+              'breakfast': 'Breakfast',
+              'lunch': 'Lunch',
+              'dinner': 'Dinner',
+              'snack': 'Snack',
+            }.entries)
+              ChoiceChip(
+                label: Text(type.value),
+                selected: _mealType == type.key,
+                onSelected: _busy
+                    ? null
+                    : (selected) {
+                        if (selected) {
+                          setState(() => _mealType = type.key);
+                        }
+                      },
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _busy ? null : () => _pickPhoto(ImageSource.camera),
+                icon: const Icon(Icons.camera_alt_outlined),
+                label: const Text('Take photo'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _busy ? null : () => _pickPhoto(ImageSource.gallery),
+                icon: const Icon(Icons.photo_library_outlined),
+                label: const Text('Choose photo'),
+              ),
+            ),
+          ],
         ),
         if (_photo case final photo?) ...[
           const SizedBox(height: 10),
@@ -306,6 +468,14 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
             label: const Text('Identify meal with AI'),
           ),
         ],
+        if (_components.isEmpty)
+          if (_message case final message?) ...[
+            const SizedBox(height: 12),
+            Text(
+              message,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
         if (_components.isNotEmpty) ...[
           const SizedBox(height: 18),
           TextField(
@@ -320,6 +490,35 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
             'Edit every suggested item. Vision cannot reliably know hidden ingredients, oil, salt, or portion weight.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
+          Text(
+            'Quick sizes are starting estimates. You can edit grams or enter pieces with grams per piece.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppTheme.sage,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.fact_check_outlined, color: AppTheme.green),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'We look up nutrition for each food you confirm. Choose one matching result for every item ($matchedCount of ${_components.length} matched).',
+                    style: const TextStyle(
+                      color: AppTheme.green,
+                      fontWeight: FontWeight.w600,
+                      height: 1.35,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
           for (var index = 0; index < _components.length; index++) ...[
             const SizedBox(height: 14),
             _componentEditor(_components[index], index),
@@ -332,6 +531,65 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
             icon: const Icon(Icons.add),
             label: const Text('Add a food item'),
           ),
+          if (_message case final message? when message.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _busy
+                    ? AppTheme.sage
+                    : _messageIsError
+                    ? Theme.of(context).colorScheme.errorContainer
+                    : AppTheme.sage,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  if (_busy)
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Icon(
+                      _messageIsError
+                          ? Icons.error_outline
+                          : Icons.check_circle_outline,
+                      color: _messageIsError
+                          ? Theme.of(context).colorScheme.onErrorContainer
+                          : AppTheme.green,
+                    ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(message),
+                        if (_messageIsError && !_busy) ...[
+                          const SizedBox(height: 6),
+                          TextButton(
+                            onPressed: _analyzeMeal,
+                            style: TextButton.styleFrom(
+                              foregroundColor: _messageIsError
+                                  ? Theme.of(
+                                      context,
+                                    ).colorScheme.onErrorContainer
+                                  : AppTheme.green,
+                              padding: EdgeInsets.zero,
+                              minimumSize: const Size(0, 36),
+                              alignment: Alignment.centerLeft,
+                            ),
+                            child: const Text('Try again'),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
           FilledButton.icon(
             onPressed: _busy ? null : _analyzeMeal,
@@ -345,12 +603,12 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
                     ),
                   )
                 : const Icon(Icons.analytics_outlined),
-            label: const Text('Confirm and calculate nutrition'),
+            label: Text(
+              matchedCount == _components.length
+                  ? 'Calculate & save meal'
+                  : 'Find nutrition info ($matchedCount of ${_components.length})',
+            ),
           ),
-        ],
-        if (_message case final message? when message.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(message, style: const TextStyle(color: AppTheme.green)),
         ],
       ],
     );
@@ -358,6 +616,7 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
 
   Widget _componentEditor(_MealComponentDraft item, int index) {
     return Card(
+      key: item.cardKey,
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -398,10 +657,76 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
+              onChanged: (_) {
+                item.pieces.clear();
+                item.gramsPerPiece.clear();
+              },
               decoration: const InputDecoration(
                 labelText: 'Confirmed portion (g)',
                 border: OutlineInputBorder(),
               ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [
+                ActionChip(
+                  label: const Text('Small · 100 g'),
+                  onPressed: () => setState(() {
+                    item.portionG.text = '100';
+                    item.pieces.clear();
+                    item.gramsPerPiece.clear();
+                  }),
+                ),
+                ActionChip(
+                  label: const Text('Medium · 200 g'),
+                  onPressed: () => setState(() {
+                    item.portionG.text = '200';
+                    item.pieces.clear();
+                    item.gramsPerPiece.clear();
+                  }),
+                ),
+                ActionChip(
+                  label: const Text('Large · 300 g'),
+                  onPressed: () => setState(() {
+                    item.portionG.text = '300';
+                    item.pieces.clear();
+                    item.gramsPerPiece.clear();
+                  }),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: item.pieces,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    onChanged: (_) => _updatePieceWeight(item),
+                    decoration: const InputDecoration(
+                      labelText: 'Pieces (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: item.gramsPerPiece,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    onChanged: (_) => _updatePieceWeight(item),
+                    decoration: const InputDecoration(
+                      labelText: 'g per piece',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 8),
             TextField(
@@ -428,17 +753,29 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
               onPressed: item.searching ? null : () => _searchFood(item),
               child: Text(
                 item.searching
-                    ? 'Searching USDA…'
-                    : 'Find matching USDA nutrition data',
+                    ? 'Finding nutrition…'
+                    : item.selectedFood == null
+                    ? 'Find nutrition info'
+                    : 'Find a different match',
               ),
             ),
+            if (item.selectedFood == null && item.foods.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  'Choose a nutrition result for this food to continue.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ),
             if (item.foods.isNotEmpty)
               DropdownButtonFormField<UsdaFood>(
                 initialValue: item.selectedFood,
                 isExpanded: true,
-                hint: const Text('Select a matching USDA record'),
+                hint: const Text('Choose the closest food'),
                 decoration: const InputDecoration(
-                  labelText: 'Confirm nutrition record',
+                  labelText: 'Which one looks closest?',
                   border: OutlineInputBorder(),
                 ),
                 items: item.foods
@@ -452,12 +789,25 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
                       ),
                     )
                     .toList(),
-                onChanged: (food) => setState(() => item.selectedFood = food),
+                onChanged: (food) => setState(() {
+                  item.selectedFood = food;
+                  _message = null;
+                }),
               ),
+            if (item.selectedFood case final selected?) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Nutrition will use: ${selected.description}',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppTheme.green,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
             if (item.foods.isNotEmpty) ...[
               const SizedBox(height: 4),
               Text(
-                'Choose the record that best matches this food and preparation. Nutrition is calculated from that USDA record.',
+                'Pick the closest match. The serving and preparation should look like your food.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -481,7 +831,7 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
                       textInputAction: TextInputAction.search,
                       onSubmitted: (query) => _searchFood(item, query: query),
                       decoration: const InputDecoration(
-                        labelText: 'Search USDA with a simpler food name',
+                        labelText: 'Try a shorter food name',
                         hintText: 'For example: cooked lentils',
                         border: OutlineInputBorder(),
                       ),
@@ -494,7 +844,7 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
                               item,
                               query: item.alternativeSearch.text,
                             ),
-                      child: const Text('Search this name'),
+                      child: const Text('Try this name'),
                     ),
                   ],
                 ),
@@ -523,18 +873,17 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
             fontWeight: FontWeight.w800,
           ),
         ),
+        const SizedBox(height: 4),
+        Text(
+          result.mealType[0].toUpperCase() + result.mealType.substring(1),
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: AppTheme.green,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
         const SizedBox(height: 14),
         Text('Confirmed items', style: Theme.of(context).textTheme.titleMedium),
-        for (final item in result.components)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text('${item['food_name']} · ${item['portion_g']} g'),
-            subtitle: Text(
-              'USDA match: ${item['data_source']}\n'
-              'Ingredients: ${(item['ingredients'] as List).join(', ')} · '
-              '${item['cooking_method']}',
-            ),
-          ),
+        for (final item in result.components) _componentResultCard(item),
         const SizedBox(height: 8),
         Text(
           'Estimated meal nutrition',
@@ -573,12 +922,62 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
           'Nutrition is an estimate based on the specific USDA records and portions you confirmed. Recipes, brands, oil, and salt can make the real meal different.',
         ),
         const SizedBox(height: 18),
-        FilledButton(onPressed: _reset, child: const Text('Scan another meal')),
-        TextButton(
-          onPressed: () => context.pop(),
-          child: const Text('Back to home'),
+        FilledButton.icon(
+          onPressed: () => context.pop(true),
+          icon: const Icon(Icons.check_circle_outline),
+          label: const Text('Saved to diary · Done'),
         ),
+        TextButton(onPressed: _reset, child: const Text('Add another meal')),
       ],
+    );
+  }
+
+  Widget _componentResultCard(Map<String, dynamic> item) {
+    final nutrition =
+        item['nutrition'] as Map<String, dynamic>? ?? const <String, dynamic>{};
+    final pieceCount = item['portion_pieces'];
+    final pieceLabel = pieceCount == null ? '' : ' · $pieceCount pieces';
+    const componentNutrients = {
+      'energy_kcal': 'kcal',
+      'protein_g': 'g protein',
+      'carbohydrates_g': 'g carbs',
+      'total_fat_g': 'g fat',
+    };
+    return Card(
+      margin: const EdgeInsets.only(top: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${item['food_name']} · ${item['portion_g']} g$pieceLabel',
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'USDA match: ${item['data_source']}\n'
+              'Ingredients: ${(item['ingredients'] as List).join(', ')} · '
+              '${item['cooking_method']}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: [
+                for (final entry in componentNutrients.entries)
+                  if (nutrition[entry.key] != null)
+                    Chip(
+                      label: Text('${nutrition[entry.key]} ${entry.value}'),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                    ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -590,17 +989,24 @@ class _MealComponentDraft {
     String ingredients = '',
     String cookingMethod = '',
     String alternativeSearch = '',
+    String pieces = '',
+    String gramsPerPiece = '',
   }) : foodName = TextEditingController(text: foodName),
        portionG = TextEditingController(text: portionG),
+       pieces = TextEditingController(text: pieces),
+       gramsPerPiece = TextEditingController(text: gramsPerPiece),
        ingredients = TextEditingController(text: ingredients),
        cookingMethod = TextEditingController(text: cookingMethod),
        alternativeSearch = TextEditingController(text: alternativeSearch);
 
   final TextEditingController foodName;
   final TextEditingController portionG;
+  final TextEditingController pieces;
+  final TextEditingController gramsPerPiece;
   final TextEditingController ingredients;
   final TextEditingController cookingMethod;
   final TextEditingController alternativeSearch;
+  final GlobalKey cardKey = GlobalKey();
   List<UsdaFood> foods = [];
   UsdaFood? selectedFood;
   String? searchError;
@@ -610,6 +1016,8 @@ class _MealComponentDraft {
   void dispose() {
     foodName.dispose();
     portionG.dispose();
+    pieces.dispose();
+    gramsPerPiece.dispose();
     ingredients.dispose();
     cookingMethod.dispose();
     alternativeSearch.dispose();

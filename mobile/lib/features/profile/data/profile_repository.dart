@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/config/app_config.dart';
 import '../../../core/network/api_client.dart';
 import 'profile.dart';
 
@@ -24,7 +25,9 @@ class ProfileRepository {
       final response = await _client.get<Map<String, dynamic>>('/api/v1/me');
       final data = response.data;
       if (data == null) {
-        throw const FoodScanApiException('The server returned an empty profile.');
+        throw const FoodScanApiException(
+          'The server returned an empty profile.',
+        );
       }
       return Profile.fromJson(data);
     } on DioException catch (error) {
@@ -40,7 +43,9 @@ class ProfileRepository {
       );
       final data = response.data;
       if (data == null) {
-        throw const FoodScanApiException('The server returned an empty profile.');
+        throw const FoodScanApiException(
+          'The server returned an empty profile.',
+        );
       }
       return Profile.fromJson(data);
     } on DioException catch (error) {
@@ -67,8 +72,22 @@ class FoodScanApiException implements Exception {
           'Uploading the photos took too long. Try fewer or smaller images.',
         );
       }
-      return const FoodScanApiException(
-        'Could not connect to the FoodScan API. Check that the backend is running, then retry.',
+      if (error.type == DioExceptionType.connectionTimeout) {
+        return FoodScanApiException(
+          'FoodScan could not reach the backend at ${AppConfig.apiBaseUrl}. '
+          'Make sure the backend is running, then try again.',
+        );
+      }
+      if (error.type == DioExceptionType.connectionError) {
+        return FoodScanApiException(
+          'Could not reach the FoodScan backend at ${AppConfig.apiBaseUrl}. '
+          'Check that it is running. If it is, check for a browser CORS or '
+          'network error.',
+        );
+      }
+      return FoodScanApiException(
+        'FoodScan did not receive a response from the backend at '
+        '${AppConfig.apiBaseUrl}. Check that it is running, then retry.',
       );
     }
     final status = error.response?.statusCode;
@@ -82,7 +101,9 @@ class FoodScanApiException implements Exception {
             message.toLowerCase().contains('usage limit'),
       );
     }
-    return FoodScanApiException('The FoodScan API returned an error ($status).');
+    return FoodScanApiException(
+      'The FoodScan API returned an error ($status).',
+    );
   }
 
   @override

@@ -25,7 +25,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/scan/meal',
-        builder: (context, state) => const MealScanScreen(),
+        builder: (context, state) {
+          final requestedType = state.uri.queryParameters['type'];
+          const mealTypes = {'breakfast', 'lunch', 'dinner', 'snack'};
+          return MealScanScreen(
+            initialMealType:
+                mealTypes.contains(requestedType) ? requestedType! : 'lunch',
+          );
+        },
       ),
     ],
   );

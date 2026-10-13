@@ -1,4 +1,5 @@
 from decimal import Decimal, InvalidOperation
+import re
 from typing import Any
 
 import httpx
@@ -29,13 +30,15 @@ class UsdaServiceError(Exception):
 
 async def search_foods(query: str) -> list[dict[str, Any]]:
     key = _api_key()
+    request_query = query.strip()
+    params = {"api_key": key}
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20.0)) as client:
-            response = await client.get(
+            response = await client.post(
                 f"{_FDC_API}/foods/search",
-                params={
-                    "api_key": key,
-                    "query": query,
+                params=params,
+                json={
+                    "query": request_query,
                     "pageSize": 20,
                     "dataType": [
                         "Foundation",
@@ -45,6 +48,23 @@ async def search_foods(query: str) -> list[dict[str, Any]]:
                     ],
                 },
             )
+            if response.status_code == 400:
+                simplified_query = _simplify_search_query(request_query)
+                if simplified_query and simplified_query != request_query:
+                    response = await client.post(
+                        f"{_FDC_API}/foods/search",
+                        params=params,
+                        json={
+                            "query": simplified_query,
+                            "pageSize": 20,
+                            "dataType": [
+                                "Foundation",
+                                "SR Legacy",
+                                "Survey (FNDDS)",
+                                "Branded",
+                            ],
+                        },
+                    )
     except httpx.TimeoutException as error:
         raise UsdaServiceError("USDA FoodData Central timed out.") from error
     except httpx.RequestError as error:
@@ -124,9 +144,30 @@ def _api_key() -> str:
     return settings.usda_api_key.get_secret_value()
 
 
+def _simplify_search_query(query: str) -> str:
+    words = re.sub(r"[^\w\s]", " ", query, flags=re.UNICODE).split()
+    return " ".join(words)
+
+
 def _raise_for_response(response: httpx.Response) -> None:
-    if response.is_error:
-        raise UsdaServiceError(
-            f"USDA FoodData Central returned HTTP {response.status_code}. "
-            "Check the backend API key and quota."
+    if not response.is_error:
+        return
+
+    if response.status_code == 400:
+        message = (
+            "USDA could not process that food search. Try the main food name, "
+            "such as “carrot” or “lentils”."
         )
+    elif response.status_code == 403:
+        message = (
+            "USDA did not accept the API key. Check USDA_API_KEY in "
+            "backend/.env, then restart the backend."
+        )
+    elif response.status_code == 429:
+        message = "USDA search is temporarily rate-limited. Wait a little and try again."
+    elif response.status_code >= 500:
+        message = "USDA is temporarily unavailable. Please try again shortly."
+    else:
+        message = "USDA could not complete the food search. Please try again."
+
+    raise UsdaServiceError(message)

@@ -405,8 +405,8 @@ def test_usda_food_search_includes_prepared_food_and_branded_records(monkeypatch
         async def __aexit__(self, *args):
             return None
 
-        async def get(self, url, *, params):
-            captured.update(url=url, params=params)
+        async def post(self, url, *, params, json):
+            captured.update(url=url, params=params, json=json)
             return FakeResponse()
 
     monkeypatch.setattr(usda.httpx, "AsyncClient", FakeAsyncClient)
@@ -421,13 +421,97 @@ def test_usda_food_search_includes_prepared_food_and_branded_records(monkeypatch
             "data_type": "Survey (FNDDS)",
         }
     ]
-    assert captured["params"]["pageSize"] == 20
-    assert captured["params"]["dataType"] == [
-        "Foundation",
-        "SR Legacy",
-        "Survey (FNDDS)",
-        "Branded",
+    assert captured["params"] == {"api_key": "test-key"}
+    assert captured["json"] == {
+        "query": "dal",
+        "pageSize": 20,
+        "dataType": [
+            "Foundation",
+            "SR Legacy",
+            "Survey (FNDDS)",
+            "Branded",
+        ],
+    }
+
+
+def test_usda_food_search_retries_query_without_punctuation(monkeypatch):
+    import asyncio
+
+    from pydantic import SecretStr
+
+    from app.services import usda
+
+    requests = []
+
+    class FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self.is_error = status_code >= 400
+            self.payload = payload
+
+        def json(self):
+            return self.payload
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, *, params, json):
+            requests.append(json["query"])
+            if len(requests) == 1:
+                return FakeResponse(400, {"message": "Invalid query"})
+            return FakeResponse(
+                200,
+                {
+                    "foods": [
+                        {
+                            "fdcId": 456,
+                            "description": "Carrots, cooked",
+                            "dataType": "SR Legacy",
+                        }
+                    ]
+                },
+            )
+
+    monkeypatch.setattr(usda.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(usda.settings, "usda_api_key", SecretStr("test-key"))
+
+    foods = asyncio.run(usda.search_foods("Spiced carrot salad/stir-fry"))
+
+    assert requests == [
+        "Spiced carrot salad/stir-fry",
+        "Spiced carrot salad stir fry",
     ]
+    assert foods[0]["description"] == "Carrots, cooked"
+
+
+def test_usda_search_error_messages_are_actionable():
+    from app.services.usda import UsdaServiceError, _raise_for_response
+
+    class FakeResponse:
+        is_error = True
+
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+    expected_messages = {
+        400: "Try a shorter name",
+        403: "Check USDA_API_KEY",
+        429: "rate-limited",
+    }
+    for status_code, expected_message in expected_messages.items():
+        try:
+            _raise_for_response(FakeResponse(status_code))
+        except UsdaServiceError as error:
+            assert expected_message in str(error)
+        else:
+            raise AssertionError(f"HTTP {status_code} must be reported.")
 
 
 def test_health(client):
@@ -679,11 +763,14 @@ def test_meal_confirm_uses_selected_usda_food_and_confirmed_portion(
         "/api/v1/scans/meals/confirm",
         json={
             "meal_name": "Rice",
+            "meal_type": "lunch",
             "components": [
                 {
                     "fdc_id": 123,
                     "food_name": "Cooked white rice",
                     "portion_g": 150,
+                    "portion_pieces": 2,
+                    "grams_per_piece": 75,
                     "ingredients": ["rice", "water"],
                     "cooking_method": "boiled",
                 }
@@ -695,6 +782,9 @@ def test_meal_confirm_uses_selected_usda_food_and_confirmed_portion(
     result = response.json()
     assert result["nutrition_totals"]["energy_kcal"] == "195.0"
     assert result["nutrition_totals"]["protein_g"] == "4.0"
+    assert result["meal_type"] == "lunch"
+    assert result["components"][0]["portion_pieces"] == "2"
+    assert result["components"][0]["grams_per_piece"] == "75"
     assert result["components"][0]["data_source"] == (
         "USDA FoodData Central (SR Legacy)"
     )
@@ -703,6 +793,36 @@ def test_meal_confirm_uses_selected_usda_food_and_confirmed_portion(
     fetched = client.get(f"/api/v1/scans/meals/{result['scan_id']}")
     assert fetched.status_code == 200
     assert fetched.json()["meal_name"] == "Rice"
+
+    diary = client.get(
+        "/api/v1/scans/meals",
+        params={"date": result["created_at"][:10]},
+    )
+    assert diary.status_code == 200
+    assert diary.json()["date"] == result["created_at"][:10]
+    assert len(diary.json()["meals"]) == 1
+    assert diary.json()["meals"][0]["meal_type"] == "lunch"
+
+
+def test_meal_confirm_rejects_inconsistent_piece_weight(client):
+    response = client.post(
+        "/api/v1/scans/meals/confirm",
+        json={
+            "meal_name": "Roti",
+            "components": [
+                {
+                    "fdc_id": 123,
+                    "food_name": "Roti",
+                    "portion_g": 100,
+                    "portion_pieces": 2,
+                    "grams_per_piece": 40,
+                    "cooking_method": "baked",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_packaged_scan_rejects_missing_nutrition_values(client):

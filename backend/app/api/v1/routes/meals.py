@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -9,6 +10,7 @@ from app.api.v1.routes.profiles import LOCAL_PROFILE_ID
 from app.db.session import get_db
 from app.models import FoodScan, MealScanDetails, UserProfile
 from app.schemas.meal import (
+    MealDiaryRead,
     MealScanConfirm,
     MealScanRead,
     MealVisionExtractionResponse,
@@ -104,6 +106,16 @@ async def confirm_meal(
             {
                 "food_name": item.food_name,
                 "portion_g": str(item.portion_g),
+                "portion_pieces": (
+                    str(item.portion_pieces)
+                    if item.portion_pieces is not None
+                    else None
+                ),
+                "grams_per_piece": (
+                    str(item.grams_per_piece)
+                    if item.grams_per_piece is not None
+                    else None
+                ),
                 "ingredients": item.ingredients,
                 "cooking_method": item.cooking_method,
                 "fdc_id": item.fdc_id,
@@ -143,6 +155,7 @@ async def confirm_meal(
     scan = FoodScan(id=uuid4(), profile_id=profile.id, status="completed")
     details = MealScanDetails(
         scan_id=scan.id,
+        meal_type=request.meal_type,
         meal_name=request.meal_name,
         components=components,
         nutrition_totals={name: str(value) for name, value in totals.items()},
@@ -163,6 +176,37 @@ async def confirm_meal(
             detail="The saved meal scan could not be reloaded.",
         )
     return _meal_response(persisted)
+
+
+@router.get("/scans/meals", response_model=MealDiaryRead)
+def get_meal_diary(
+    diary_date: date = Query(alias="date"),
+    timezone_offset_minutes: int = Query(default=0, ge=-840, le=840),
+    db: Session = Depends(get_db),
+) -> MealDiaryRead:
+    start = datetime.combine(diary_date, time.min) - timedelta(
+        minutes=timezone_offset_minutes
+    )
+    end = start + timedelta(days=1)
+    scans = (
+        db.query(FoodScan)
+        .join(MealScanDetails)
+        .options(
+            selectinload(FoodScan.meal_details),
+            selectinload(FoodScan.profile),
+        )
+        .filter(
+            FoodScan.profile_id == LOCAL_PROFILE_ID,
+            FoodScan.created_at >= start,
+            FoodScan.created_at < end,
+        )
+        .order_by(FoodScan.created_at.desc())
+        .all()
+    )
+    return MealDiaryRead(
+        date=diary_date,
+        meals=[_meal_response(scan) for scan in scans],
+    )
 
 
 @router.get("/scans/meals/{scan_id}", response_model=MealScanRead)
@@ -192,6 +236,8 @@ def _meal_response(scan: FoodScan) -> MealScanRead:
     return MealScanRead(
         scan_id=str(scan.id),
         status=scan.status,
+        meal_type=details.meal_type or "snack",
+        created_at=scan.created_at,
         meal_name=details.meal_name,
         components=details.components,
         nutrition_totals=details.nutrition_totals,
