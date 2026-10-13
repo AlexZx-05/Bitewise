@@ -50,20 +50,37 @@ class ProfileRepository {
 }
 
 class FoodScanApiException implements Exception {
-  const FoodScanApiException(this.message);
+  const FoodScanApiException(this.message, {this.isQuotaExceeded = false});
 
   final String message;
+  final bool isQuotaExceeded;
 
   factory FoodScanApiException.fromDio(DioException error) {
     if (error.response == null) {
+      if (error.type == DioExceptionType.receiveTimeout) {
+        return const FoodScanApiException(
+          'The FoodScan API took too long to respond. The AI provider may be busy; please retry in a moment.',
+        );
+      }
+      if (error.type == DioExceptionType.sendTimeout) {
+        return const FoodScanApiException(
+          'Uploading the photos took too long. Try fewer or smaller images.',
+        );
+      }
       return const FoodScanApiException(
-        'Could not reach the FoodScan API. Check that the backend is running, then retry.',
+        'Could not connect to the FoodScan API. Check that the backend is running, then retry.',
       );
     }
     final status = error.response?.statusCode;
     final detail = error.response?.data;
     if (detail is Map<String, dynamic> && detail['detail'] is String) {
-      return FoodScanApiException(detail['detail'] as String);
+      final message = detail['detail'] as String;
+      return FoodScanApiException(
+        message,
+        isQuotaExceeded:
+            message.toLowerCase().contains('quota') ||
+            message.toLowerCase().contains('usage limit'),
+      );
     }
     return FoodScanApiException('The FoodScan API returned an error ($status).');
   }

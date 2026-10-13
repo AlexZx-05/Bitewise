@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    JSON,
     Numeric,
     String,
     Table,
@@ -98,6 +99,7 @@ class FoodScan(Base):
     profile_id: Mapped[str] = mapped_column(
         ForeignKey("user_profiles.id", ondelete="CASCADE"), index=True
     )
+    profile: Mapped[UserProfile] = relationship()
     product_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("food_products.id", ondelete="SET NULL")
     )
@@ -108,6 +110,57 @@ class FoodScan(Base):
     findings: Mapped[list["ScanFinding"]] = relationship(
         back_populates="scan", cascade="all, delete-orphan"
     )
+    packaged_details: Mapped[Optional["PackagedScanDetails"]] = relationship(
+        back_populates="scan", cascade="all, delete-orphan", uselist=False
+    )
+    meal_details: Mapped[Optional["MealScanDetails"]] = relationship(
+        back_populates="scan", cascade="all, delete-orphan", uselist=False
+    )
+
+
+class PackagedScanDetails(Base):
+    __tablename__ = "packaged_scan_details"
+    __table_args__ = (
+        CheckConstraint(
+            "nutrition_basis IN ('per_serving', 'per_100g')",
+            name="ck_packaged_scan_details_nutrition_basis",
+        ),
+    )
+
+    scan_id: Mapped[UUID] = mapped_column(
+        ForeignKey("food_scans.id", ondelete="CASCADE"), primary_key=True
+    )
+    product_name: Mapped[str] = mapped_column(String(200))
+    brand: Mapped[Optional[str]] = mapped_column(String(150))
+    serving_size_g: Mapped[Decimal] = mapped_column(Numeric(8, 2))
+    nutrition_basis: Mapped[str] = mapped_column(String(20))
+    goal_insight: Mapped[Optional[str]] = mapped_column(String(1000))
+    llm_explanation: Mapped[Optional[str]] = mapped_column(String(2000))
+    energy_kcal: Mapped[Optional[Decimal]] = mapped_column(Numeric(9, 2))
+    protein_g: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
+    carbohydrates_g: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
+    total_fat_g: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
+    sodium_mg: Mapped[Optional[Decimal]] = mapped_column(Numeric(9, 2))
+    ingredients: Mapped[list[str]] = mapped_column(JSON)
+    declared_allergens: Mapped[list[str]] = mapped_column(JSON, default=list)
+    precautionary_allergen_statement: Mapped[Optional[str]] = mapped_column(
+        String(1000)
+    )
+    scan: Mapped[FoodScan] = relationship(back_populates="packaged_details")
+
+
+class MealScanDetails(Base):
+    __tablename__ = "meal_scan_details"
+
+    scan_id: Mapped[UUID] = mapped_column(
+        ForeignKey("food_scans.id", ondelete="CASCADE"), primary_key=True
+    )
+    meal_name: Mapped[str] = mapped_column(String(200))
+    components: Mapped[list[dict[str, object]]] = mapped_column(JSON)
+    nutrition_totals: Mapped[dict[str, object]] = mapped_column(JSON)
+    goal_explanation: Mapped[str] = mapped_column(String(2000))
+    alternative_guidance: Mapped[str] = mapped_column(String(1000))
+    scan: Mapped[FoodScan] = relationship(back_populates="meal_details")
 
 
 class ScanFinding(Base):

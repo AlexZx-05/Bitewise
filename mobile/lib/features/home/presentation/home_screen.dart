@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../profile/data/profile.dart';
@@ -15,18 +16,14 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _selectedTab = 0;
 
-  void _showComingSoon() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Food scanning is planned for Milestone 4.'),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final pages = [
-      _HomeContent(onScan: _showComingSoon),
+      _HomeContent(
+        onScanner: () => context.push('/scan'),
+        onPackagedScan: () => context.push('/scan/packaged'),
+        onMealScan: () => context.push('/scan/meal'),
+      ),
       const _EmptySection(
         icon: Icons.menu_book_outlined,
         title: 'Your food diary',
@@ -60,9 +57,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 }
 
 class _HomeContent extends ConsumerWidget {
-  const _HomeContent({required this.onScan});
+  const _HomeContent({
+    required this.onScanner,
+    required this.onPackagedScan,
+    required this.onMealScan,
+  });
 
-  final VoidCallback onScan;
+  final VoidCallback onScanner;
+  final VoidCallback onPackagedScan;
+  final VoidCallback onMealScan;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -105,7 +108,7 @@ class _HomeContent extends ConsumerWidget {
         const SizedBox(height: 22),
         _GoalSummary(profile: profile),
         const SizedBox(height: 18),
-        _ScanCard(onScan: onScan),
+        _ScanCard(onScan: onScanner),
         const SizedBox(height: 24),
         Text(
           'What are you eating?',
@@ -119,14 +122,14 @@ class _HomeContent extends ConsumerWidget {
           icon: Icons.inventory_2_outlined,
           title: 'Packaged food',
           subtitle: 'Ingredients and nutrition label',
-          onTap: onScan,
+          onTap: onPackagedScan,
         ),
         const SizedBox(height: 10),
         _FoodTypeTile(
           icon: Icons.ramen_dining_outlined,
           title: 'Home-cooked meal',
           subtitle: 'Understand an everyday meal',
-          onTap: onScan,
+          onTap: onMealScan,
         ),
         const SizedBox(height: 24),
         Text(

@@ -3,6 +3,8 @@ from app.models.entities import (
     FoodProduct,
     FoodScan,
     Ingredient,
+    MealScanDetails,
+    PackagedScanDetails,
     ScanFinding,
     UserProfile,
 )
@@ -12,6 +14,8 @@ __all__ = [
     "FoodProduct",
     "FoodScan",
     "Ingredient",
+    "MealScanDetails",
+    "PackagedScanDetails",
     "ScanFinding",
     "UserProfile",
 ]
