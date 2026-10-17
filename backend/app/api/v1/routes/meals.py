@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -21,9 +22,15 @@ from app.services.groq import (
     explain_meal,
     extract_meal,
 )
+from app.services.open_food_facts import (
+    OpenFoodFactsError,
+    find_alternative_product,
+)
+from app.services.recommendations import meal_alternative
 from app.services.usda import UsdaServiceError, get_food_nutrition, search_foods
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 _MAX_IMAGE_BYTES = 8 * 1024 * 1024
 _NUTRIENTS = ("energy_kcal", "protein_g", "carbohydrates_g", "total_fat_g", "sodium_mg")
 
@@ -138,7 +145,7 @@ async def confirm_meal(
         db.add(profile)
         db.flush()
     try:
-        explanation = await explain_meal(
+        explanation, alternative_guidance = await explain_meal(
             request.meal_name,
             components,
             totals,
@@ -146,11 +153,30 @@ async def confirm_meal(
             profile.daily_calorie_goal,
         )
     except GroqServiceError as error:
-        db.rollback()
-        raise HTTPException(
-            status_code=error.status_code,
-            detail=f"Groq meal explanation failed: {error}",
-        ) from error
+        logger.warning(
+            "Groq explanation unavailable for meal %r: %s",
+            request.meal_name,
+            error,
+        )
+        explanation = (
+            "Your meal is saved with nutrition calculated from the USDA foods "
+            "and portions you confirmed. The AI explanation was unavailable; "
+            "the recommendation is general guidance based on your goal."
+        )
+        alternative_guidance = meal_alternative(profile.goal)
+
+    alternative_product = None
+    try:
+        alternative_product = await find_alternative_product(
+            request.components[0].food_name,
+            profile.goal,
+        )
+    except OpenFoodFactsError as error:
+        logger.warning(
+            "Product alternative lookup unavailable for meal %r: %s",
+            request.meal_name,
+            error,
+        )
 
     scan = FoodScan(id=uuid4(), profile_id=profile.id, status="completed")
     details = MealScanDetails(
@@ -160,11 +186,8 @@ async def confirm_meal(
         components=components,
         nutrition_totals={name: str(value) for name, value in totals.items()},
         goal_explanation=explanation,
-        alternative_guidance=(
-            "For a similar taste, compare a user-confirmed alternative with "
-            "matching USDA FoodData Central records and the same portion size. "
-            "No unverified alternative nutrition has been assumed."
-        ),
+        alternative_guidance=alternative_guidance,
+        alternative_product=alternative_product,
     )
     db.add(scan)
     db.add(details)
@@ -243,4 +266,11 @@ def _meal_response(scan: FoodScan) -> MealScanRead:
         nutrition_totals=details.nutrition_totals,
         goal_explanation=details.goal_explanation,
         alternative_guidance=details.alternative_guidance,
+        alternative_product=details.alternative_product,
+        alternative_product_notice=(
+            "No matching product with a photo and complete macros was found. "
+            "Check any alternative's own label before comparing nutrition."
+            if details.alternative_product is None
+            else None
+        ),
     )

@@ -1,3 +1,4 @@
+import logging
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -17,8 +18,14 @@ from app.services.groq import (
     extract_packaged_label,
 )
 from app.services.packaged_analysis import analyze_confirmed_label
+from app.services.open_food_facts import (
+    OpenFoodFactsError,
+    find_alternative_product,
+)
+from app.services.recommendations import packaged_food_alternative
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _scan_response(scan: FoodScan) -> PackagedScanRead:
@@ -28,7 +35,6 @@ def _scan_response(scan: FoodScan) -> PackagedScanRead:
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Packaged scan details not found",
         )
-    profile = scan.profile
     return PackagedScanRead(
         scan_id=scan.id,
         status=scan.status,
@@ -38,6 +44,21 @@ def _scan_response(scan: FoodScan) -> PackagedScanRead:
         goal_insight=details.goal_insight
         or "No goal-based insight was stored for this scan.",
         llm_explanation=details.llm_explanation,
+        goal_alternative=details.goal_alternative,
+        alternative_product=details.alternative_product,
+        alternative_product_notice=(
+            "No matching product with a photo and complete macros was found. "
+            "Check any alternative's own label before comparing nutrition."
+            if details.alternative_product is None
+            else None
+        ),
+        analysis_notice=(
+            "The AI explanation was unavailable. The recommendation below is "
+            "general guidance based on your goal, not a verified nutrition "
+            "comparison."
+            if not details.llm_explanation or not details.goal_alternative
+            else None
+        ),
     )
 
 
@@ -123,19 +144,39 @@ async def create_packaged_scan(
     details.goal_insight = goal_insight
     scan.findings.extend(findings)
     try:
-        details.llm_explanation = await explain_packaged_label(
+        explanation, goal_alternative = await explain_packaged_label(
             details,
             findings,
             goal_insight,
             profile.goal,
             profile.daily_calorie_goal,
         )
+        details.llm_explanation = explanation
+        details.goal_alternative = goal_alternative
     except GroqServiceError as error:
-        db.rollback()
-        raise HTTPException(
-            status_code=error.status_code,
-            detail=f"Groq explanation failed: {error}",
-        ) from error
+        logger.warning(
+            "Groq explanation unavailable for packaged scan %s: %s",
+            scan.id,
+            error,
+        )
+        details.goal_alternative = packaged_food_alternative(
+            profile.goal,
+            details.energy_kcal,
+            details.protein_g,
+            details.nutrition_basis,
+        )
+    try:
+        details.alternative_product = await find_alternative_product(
+            request.product_name,
+            profile.goal,
+            exclude_name=request.product_name,
+        )
+    except OpenFoodFactsError as error:
+        logger.warning(
+            "Product alternative lookup unavailable for packaged scan %s: %s",
+            scan.id,
+            error,
+        )
     db.commit()
     persisted_scan = _load_scan(db, scan.id)
     if persisted_scan is None:

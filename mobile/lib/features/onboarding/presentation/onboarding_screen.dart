@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
-import '../../profile/data/profile_repository.dart';
+import 'welcome_screen.dart';
 
 enum FoodGoal {
-  fatLoss('fat_loss', 'Fat loss', 'Understand calories and make informed choices.'),
+  fatLoss(
+    'fat_loss',
+    'Fat loss',
+    'Understand calories and make informed food choices.',
+  ),
   muscleGain(
     'muscle_gain',
     'Muscle gain',
-    'Pay attention to protein, energy, and balanced meals.',
+    'Focus on protein, energy and balanced meals.',
   ),
   maintenance(
     'maintenance',
@@ -25,107 +28,183 @@ enum FoodGoal {
   final String description;
 }
 
-class OnboardingScreen extends ConsumerStatefulWidget {
-  const OnboardingScreen({super.key});
+class OnboardingScreen extends StatefulWidget {
+  const OnboardingScreen({this.initialGoal, super.key});
+
+  final String? initialGoal;
 
   @override
-  ConsumerState<OnboardingScreen> createState() => _OnboardingScreenState();
+  State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
-class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
+class _OnboardingScreenState extends State<OnboardingScreen> {
   FoodGoal? _selectedGoal;
-  bool _isSaving = false;
-  String? _errorMessage;
 
-  Future<void> _continue() async {
-    final goal = _selectedGoal;
-    if (goal == null || _isSaving) return;
-
-    setState(() {
-      _isSaving = true;
-      _errorMessage = null;
-    });
-
-    try {
-      await ref.read(profileRepositoryProvider).saveGoal(goal.value);
-      ref.invalidate(profileProvider);
-      if (mounted) context.go('/home');
-    } on FoodScanApiException catch (error) {
-      if (mounted) setState(() => _errorMessage = error.message);
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
+  @override
+  void initState() {
+    super.initState();
+    for (final goal in FoodGoal.values) {
+      if (goal.value == widget.initialGoal) {
+        _selectedGoal = goal;
+        break;
+      }
     }
+  }
+
+  void _continue() {
+    final goal = _selectedGoal;
+    if (goal == null) return;
+    context.push('/onboarding/profile', extra: goal.value);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFFAF7EF),
+      appBar: AppBar(
+        leading: IconButton(
+          onPressed: () => context.go('/welcome'),
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Back to welcome',
+        ),
+        title: const OnboardingProgress(currentStep: 1, totalSteps: 4),
+        centerTitle: true,
+        toolbarHeight: 64,
+      ),
       body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact =
+                MediaQuery.sizeOf(context).width < 400 ||
+                constraints.maxHeight < 620;
+            final horizontalPadding = compact ? 20.0 : 24.0;
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                compact ? 10 : 16,
+                horizontalPadding,
+                compact ? 8 : 12,
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'YOUR PERSONAL PLAN',
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
+                              color: AppTheme.green,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.4,
+                            ),
+                      ),
+                      const SizedBox(height: 9),
+                      Text(
+                        'What is your goal?',
+                        style: TextStyle(
+                          fontSize: compact ? 27 : 32,
+                          fontWeight: FontWeight.w800,
+                          color: const Color(0xFF171D27),
+                          height: 1.15,
+                        ),
+                      ),
+                      SizedBox(height: compact ? 6 : 10),
+                      Text(
+                        'We’ll personalize your food insights around what '
+                        'matters to you.',
+                        style: TextStyle(
+                          fontSize: compact ? 15 : 18,
+                          fontWeight: FontWeight.w400,
+                          color: const Color(0xFF4D5663),
+                          height: 1.3,
+                        ),
+                      ),
+                      SizedBox(height: compact ? 10 : 18),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            for (
+                              var index = 0;
+                              index < FoodGoal.values.length;
+                              index++
+                            ) ...[
+                              Expanded(
+                                child: _GoalCard(
+                                  goal: FoodGoal.values[index],
+                                  selected:
+                                      _selectedGoal == FoodGoal.values[index],
+                                  compact: compact,
+                                  onTap: () => setState(() {
+                                    _selectedGoal = FoodGoal.values[index];
+                                  }),
+                                ),
+                              ),
+                              if (index < FoodGoal.values.length - 1)
+                                SizedBox(height: compact ? 8 : 12),
+                            ],
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: compact ? 6 : 10),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.info_outline_rounded,
+                            size: 15,
+                            color: AppTheme.green.withValues(alpha: 0.8),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Goals personalize insights, not medical advice.',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    fontSize: 11,
+                                    color: AppTheme.charcoal.withValues(
+                                      alpha: 0.68,
+                                    ),
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
         child: Center(
+          heightFactor: 1,
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 560),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(24, 28, 24, 32),
-              children: [
-                const _BrandMark(),
-                const SizedBox(height: 40),
-                Text(
-                  'What is your goal?',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.charcoal,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _selectedGoal == null ? null : _continue,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(56),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                  ),
+                  child: const Text(
+                    'Continue',
+                    style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
-                const SizedBox(height: 10),
-                Text(
-                  'We’ll personalize your food insights around what matters to you.',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: AppTheme.charcoal.withValues(alpha: 0.72),
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 26),
-                for (final goal in FoodGoal.values) ...[
-                  _GoalCard(
-                    goal: goal,
-                    selected: _selectedGoal == goal,
-                    onTap: () => setState(() {
-                      _selectedGoal = goal;
-                      _errorMessage = null;
-                    }),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                if (_errorMessage case final message?) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    message,
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: _selectedGoal == null || _isSaving ? null : _continue,
-                  child: _isSaving
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text('Continue'),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  'Your goal helps organize food insights. It does not set a medical or calorie prescription.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: AppTheme.charcoal.withValues(alpha: 0.65),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -134,98 +213,133 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   }
 }
 
-class _BrandMark extends StatelessWidget {
-  const _BrandMark();
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: AppTheme.sage,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: const Icon(Icons.eco_outlined, color: AppTheme.green),
-        ),
-        const SizedBox(width: 12),
-        Text(
-          'FOODSCAN',
-          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            color: AppTheme.green,
-            letterSpacing: 1.6,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _GoalCard extends StatelessWidget {
   const _GoalCard({
     required this.goal,
     required this.selected,
+    required this.compact,
     required this.onTap,
   });
 
   final FoodGoal goal;
   final bool selected;
+  final bool compact;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    final (icon, iconColor) = switch (goal) {
+      FoodGoal.fatLoss => (
+        Icons.local_fire_department_rounded,
+        const Color(0xFFFF633E),
+      ),
+      FoodGoal.muscleGain => (
+        Icons.fitness_center_rounded,
+        const Color(0xFF50565D),
+      ),
+      FoodGoal.maintenance => (Icons.spa_rounded, const Color(0xFF25846B)),
+    };
+
     return Semantics(
       button: true,
       selected: selected,
       label: '${goal.label}. ${goal.description}',
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: selected ? AppTheme.sage : Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: selected ? AppTheme.green : Colors.transparent,
-              width: 1.5,
-            ),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFFF8FCF6) : const Color(0xFFFFFEFA),
+          borderRadius: BorderRadius.circular(23),
+          border: Border.all(
+            color: selected
+                ? const Color(0xFF176B52)
+                : const Color(0xFFE9E7E0),
+            width: selected ? 1.8 : 1.2,
           ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      goal.label,
-                      style: const TextStyle(
-                        color: AppTheme.charcoal,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(23),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? 14 : 18,
+                vertical: compact ? 8 : 12,
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    width: compact ? 42 : 58,
+                    child: Center(
+                      child: Icon(
+                        icon,
+                        color: iconColor,
+                        size: compact ? 34 : 42,
                       ),
                     ),
-                    const SizedBox(height: 5),
-                    Text(
-                      goal.description,
-                      style: TextStyle(
-                        color: AppTheme.charcoal.withValues(alpha: 0.72),
-                        height: 1.35,
-                      ),
+                  ),
+                  SizedBox(width: compact ? 8 : 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          goal.label,
+                          style: TextStyle(
+                            fontSize: compact ? 18 : 21,
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFF111827),
+                            height: 1.2,
+                          ),
+                        ),
+                        SizedBox(height: compact ? 3 : 5),
+                        Text(
+                          goal.description,
+                          style: TextStyle(
+                            fontSize: compact ? 13 : 15,
+                            fontWeight: FontWeight.w400,
+                            color: const Color(0xFF555D68),
+                            height: 1.25,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  SizedBox(width: compact ? 6 : 8),
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    width: compact ? 28 : 32,
+                    height: compact ? 28 : 32,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: selected
+                          ? const Color(0xFF176B52)
+                          : Colors.transparent,
+                      border: selected
+                          ? null
+                          : Border.all(
+                              color: const Color(0xFFCDD0CC),
+                              width: 2,
+                            ),
+                    ),
+                    child: selected
+                        ? Icon(
+                            Icons.check_rounded,
+                            color: Colors.white,
+                            size: compact ? 19 : 22,
+                          )
+                        : null,
+                  ),
+                ],
               ),
-              const SizedBox(width: 12),
-              Icon(
-                selected ? Icons.check_circle : Icons.circle_outlined,
-                color: selected ? AppTheme.green : AppTheme.charcoal.withValues(alpha: 0.35),
-              ),
-            ],
+            ),
           ),
         ),
       ),

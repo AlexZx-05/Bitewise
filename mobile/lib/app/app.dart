@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../core/theme/app_theme.dart';
+import '../features/home/presentation/home_screen.dart';
 import '../features/profile/data/profile_repository.dart';
 import 'router.dart';
 
@@ -15,6 +16,7 @@ class FoodScanApp extends ConsumerWidget {
 
     return MaterialApp.router(
       title: 'FoodScan',
+      debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       routerConfig: router,
     );
@@ -32,7 +34,7 @@ class BootstrapScreen extends ConsumerWidget {
       body: SafeArea(
         child: Center(
           child: profile.when(
-            loading: () => const CircularProgressIndicator(),
+            loading: () => const _BootstrapLoading(),
             error: (error, stackTrace) => _LoadError(
               message: error.toString(),
               onRetry: () => ref.invalidate(profileProvider),
@@ -40,13 +42,94 @@ class BootstrapScreen extends ConsumerWidget {
             data: (value) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (context.mounted) {
-                  context.go(value.goal == null ? '/onboarding' : '/home');
+                  context.go('/splash', extra: value.goal != null);
                 }
               });
               return const CircularProgressIndicator();
             },
           ),
         ),
+      ),
+    );
+  }
+}
+
+class HomeEntryScreen extends ConsumerWidget {
+  const HomeEntryScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final profile = ref.watch(profileProvider);
+
+    return profile.when(
+      loading: () => const Scaffold(
+        body: SafeArea(child: Center(child: CircularProgressIndicator())),
+      ),
+      error: (error, stackTrace) => _LoadError(
+        message: error.toString(),
+        onRetry: () => ref.invalidate(profileProvider),
+      ),
+      data: (value) {
+        if (value.goal == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (context.mounted) context.go('/');
+          });
+          return const Scaffold(
+            body: SafeArea(child: Center(child: CircularProgressIndicator())),
+          );
+        }
+        return const HomeScreen();
+      },
+    );
+  }
+}
+
+class _BootstrapLoading extends StatelessWidget {
+  const _BootstrapLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(28),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: AppTheme.sage,
+              borderRadius: BorderRadius.circular(22),
+            ),
+            child: const Icon(
+              Icons.eco_rounded,
+              color: AppTheme.green,
+              size: 36,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Preparing FoodScan',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              color: AppTheme.charcoal,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Connecting to your profile…',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: AppTheme.charcoal.withValues(alpha: 0.68),
+            ),
+          ),
+          const SizedBox(height: 20),
+          const SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(strokeWidth: 2.5),
+          ),
+        ],
       ),
     );
   }

@@ -126,7 +126,7 @@ async def explain_packaged_label(
     goal_insight: str,
     goal: str | None,
     daily_calorie_goal: int | None,
-) -> str:
+) -> tuple[str, str]:
     basis_factor = (
         Decimal("1")
         if details.nutrition_basis == "per_serving"
@@ -181,24 +181,31 @@ Explain this confirmed packaged-food label for the user's selected goal.
 Use only supplied facts. Per-serving values are deterministic calculations
 from the confirmed label and serving size. Be balanced and non-judgmental.
 Mention relevant declared ingredients/allergen findings without diagnosing
-allergy safety. Call out important missing data. Do not invent health benefits,
-medical advice, product facts, alternatives, or safety guarantees. For an
-alternative, give only comparison criteria (same taste/texture and serving,
-then compare verified energy/protein/sodium labels); do not name an unverified
-product. Keep the response to 3-5 concise sentences. Return a JSON object with
-one string field named explanation.
+allergy safety. Call out important missing data. Do not invent nutrition
+values, product facts, health benefits, medical advice, or safety guarantees.
+Also suggest one practical, goal-aware alternative or swap. Base it only on
+the known product name/category, confirmed ingredients, and goal. Keep it
+general (for example, suggest comparing similar products or choosing an
+unsweetened/high-protein option only when relevant); do not name brands or
+claim the alternative has specific nutrition. If no goal is selected, make
+the suggestion generally balanced and say it is not personalized. Do not
+recommend avoiding a declared allergen as a guarantee of safety. Return a JSON
+object with string fields "explanation" and "goal_alternative".
 
 Confirmed data:
 {json.dumps(facts, ensure_ascii=False)}
 """.strip()
     result = await _generate_json(
         [{"text": prompt}],
-        max_output_tokens=512,
+        max_output_tokens=768,
     )
     explanation = result.get("explanation")
     if not isinstance(explanation, str) or not explanation.strip():
         raise GroqServiceError("Groq returned an empty label explanation.")
-    return explanation.strip()[:2000]
+    alternative = result.get("goal_alternative")
+    if not isinstance(alternative, str) or not alternative.strip():
+        raise GroqServiceError("Groq returned no goal-based food alternative.")
+    return explanation.strip()[:2000], alternative.strip()[:1000]
 
 
 async def explain_meal(
@@ -207,16 +214,18 @@ async def explain_meal(
     totals: dict[str, Decimal],
     goal: str | None,
     daily_calorie_goal: int | None,
-) -> str:
+) -> tuple[str, str]:
     prompt = f"""
 Explain this user-confirmed meal estimate in 3-5 concise, balanced sentences.
 Nutrients came from USDA FoodData Central matches selected by the user and are
 scaled deterministically by confirmed portions. Explain that database matches
 may not represent the exact recipe, oil, salt, or preparation. Use the selected
 goal only as general context; do not diagnose, prescribe, or promise safety.
-Offer one practical similar-meal comparison idea without inventing nutrient
-values or naming a specific unverified food. State uncertainty plainly. Return
-a JSON object with one string field named explanation.
+Also suggest one practical, goal-aware change or alternative based on the
+confirmed meal components. Do not invent nutrient values, promise health
+benefits, or provide medical advice. If no goal is selected, make the suggestion
+generally balanced and say it is not personalized. State uncertainty plainly.
+Return a JSON object with string fields "explanation" and "goal_alternative".
 
 Data:
 {json.dumps({
@@ -229,12 +238,15 @@ Data:
 """.strip()
     result = await _generate_json(
         [{"text": prompt}],
-        max_output_tokens=512,
+        max_output_tokens=768,
     )
     explanation = result.get("explanation")
     if not isinstance(explanation, str) or not explanation.strip():
         raise GroqServiceError("Groq returned an empty meal explanation.")
-    return explanation.strip()[:2000]
+    alternative = result.get("goal_alternative")
+    if not isinstance(alternative, str) or not alternative.strip():
+        raise GroqServiceError("Groq returned no goal-based meal alternative.")
+    return explanation.strip()[:2000], alternative.strip()[:1000]
 
 
 def _scale(value: Decimal | None, factor: Decimal) -> str | None:

@@ -36,10 +36,14 @@ class ProfileRepository {
   }
 
   Future<Profile> saveGoal(String goal) async {
+    return saveDetails({'goal': goal});
+  }
+
+  Future<Profile> saveDetails(Map<String, dynamic> details) async {
     try {
       final response = await _client.put<Map<String, dynamic>>(
         '/api/v1/me/profile',
-        data: {'goal': goal},
+        data: details,
       );
       final data = response.data;
       if (data == null) {
@@ -63,6 +67,12 @@ class FoodScanApiException implements Exception {
   factory FoodScanApiException.fromDio(DioException error) {
     if (error.response == null) {
       if (error.type == DioExceptionType.receiveTimeout) {
+        if (error.requestOptions.path == '/api/v1/me') {
+          return const FoodScanApiException(
+            'The FoodScan backend did not return your profile in time. '
+            'Check that the backend and PostgreSQL are running, then retry.',
+          );
+        }
         return const FoodScanApiException(
           'The FoodScan API took too long to respond. The AI provider may be busy; please retry in a moment.',
         );

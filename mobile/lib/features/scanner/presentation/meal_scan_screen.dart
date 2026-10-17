@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../profile/data/profile_repository.dart';
 import '../data/meal_scan_repository.dart';
+import 'alternative_product_card.dart';
 
 class MealScanScreen extends ConsumerStatefulWidget {
   const MealScanScreen({this.initialMealType = 'lunch', super.key});
@@ -65,7 +66,11 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
       }
     } catch (error) {
       if (mounted) {
-        _showMessage('Could not open photo picker: $error', isError: true);
+        final sourceLabel = source == ImageSource.camera ? 'camera' : 'gallery';
+        _showMessage(
+          'Could not open the $sourceLabel. Check its permission and try again. ($error)',
+          isError: true,
+        );
       }
     }
   }
@@ -366,7 +371,11 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
   Widget build(BuildContext context) {
     final result = _result;
     return Scaffold(
+      backgroundColor: const Color(0xFFFAF9F4),
       appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
         leading: IconButton(
           onPressed: () => context.pop(),
           icon: const Icon(Icons.arrow_back),
@@ -389,228 +398,310 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
     final matchedCount = _components
         .where((component) => component.selectedFood != null)
         .length;
-    return ListView(
-      padding: const EdgeInsets.all(22),
-      children: [
-        Text(
-          'Photo → confirm → nutrition estimate',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            color: AppTheme.charcoal,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 8),
-        const Text(
-          'Choose a meal type and photo. Groq suggests visible foods; review every item and portion before nutrition is calculated from USDA records. Food photos are not saved.',
-        ),
-        const SizedBox(height: 16),
-        Wrap(
-          spacing: 8,
+    final shortScreen = MediaQuery.sizeOf(context).height < 760;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = shortScreen || constraints.maxWidth < 360;
+        return Stack(
           children: [
-            for (final type in const {
-              'breakfast': 'Breakfast',
-              'lunch': 'Lunch',
-              'dinner': 'Dinner',
-              'snack': 'Snack',
-            }.entries)
-              ChoiceChip(
-                label: Text(type.value),
-                selected: _mealType == type.key,
-                onSelected: _busy
-                    ? null
-                    : (selected) {
-                        if (selected) {
-                          setState(() => _mealType = type.key);
-                        }
-                      },
-              ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _busy ? null : () => _pickPhoto(ImageSource.camera),
-                icon: const Icon(Icons.camera_alt_outlined),
-                label: const Text('Take photo'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _busy ? null : () => _pickPhoto(ImageSource.gallery),
-                icon: const Icon(Icons.photo_library_outlined),
-                label: const Text('Choose photo'),
-              ),
-            ),
-          ],
-        ),
-        if (_photo case final photo?) ...[
-          const SizedBox(height: 10),
-          FutureBuilder(
-            future: photo.readAsBytes(),
-            builder: (context, snapshot) => snapshot.hasData
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: Image.memory(
-                      snapshot.data!,
-                      height: 220,
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Opacity(
+                    opacity: compact ? 0.16 : 0.24,
+                    child: Image.asset(
+                      'assets/images/food__welcome.png',
+                      width: double.infinity,
+                      height: constraints.maxHeight * (compact ? 0.34 : 0.43),
                       fit: BoxFit.cover,
-                    ),
-                  )
-                : const LinearProgressIndicator(),
-          ),
-          const SizedBox(height: 10),
-          FilledButton.icon(
-            onPressed: _busy ? null : _identifyMeal,
-            icon: const Icon(Icons.auto_awesome),
-            label: const Text('Identify meal with AI'),
-          ),
-        ],
-        if (_components.isEmpty)
-          if (_message case final message?) ...[
-            const SizedBox(height: 12),
-            Text(
-              message,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ],
-        if (_components.isNotEmpty) ...[
-          const SizedBox(height: 18),
-          TextField(
-            controller: _mealName,
-            decoration: const InputDecoration(
-              labelText: 'Meal name — confirm or edit',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Edit every suggested item. Vision cannot reliably know hidden ingredients, oil, salt, or portion weight.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          Text(
-            'Quick sizes are starting estimates. You can edit grams or enter pieces with grams per piece.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppTheme.sage,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.fact_check_outlined, color: AppTheme.green),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'We look up nutrition for each food you confirm. Choose one matching result for every item ($matchedCount of ${_components.length} matched).',
-                    style: const TextStyle(
-                      color: AppTheme.green,
-                      fontWeight: FontWeight.w600,
-                      height: 1.35,
+                      alignment: Alignment.bottomCenter,
+                      errorBuilder: (context, error, stackTrace) =>
+                          const SizedBox.shrink(),
                     ),
                   ),
                 ),
-              ],
-            ),
-          ),
-          for (var index = 0; index < _components.length; index++) ...[
-            const SizedBox(height: 14),
-            _componentEditor(_components[index], index),
-          ],
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _components.length >= 10
-                ? null
-                : () => setState(() => _components.add(_MealComponentDraft())),
-            icon: const Icon(Icons.add),
-            label: const Text('Add a food item'),
-          ),
-          if (_message case final message? when message.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _busy
-                    ? AppTheme.sage
-                    : _messageIsError
-                    ? Theme.of(context).colorScheme.errorContainer
-                    : AppTheme.sage,
-                borderRadius: BorderRadius.circular(12),
               ),
-              child: Row(
-                children: [
-                  if (_busy)
-                    const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else
-                    Icon(
-                      _messageIsError
-                          ? Icons.error_outline
-                          : Icons.check_circle_outline,
-                      color: _messageIsError
-                          ? Theme.of(context).colorScheme.onErrorContainer
-                          : AppTheme.green,
+            ),
+            ListView(
+              padding: EdgeInsets.fromLTRB(
+                compact ? 18 : 22,
+                compact ? 10 : 18,
+                compact ? 18 : 22,
+                compact ? 20 : 28,
+              ),
+              children: [
+                Text(
+                  'PHOTO  →  CONFIRM  →  NUTRITION ESTIMATE',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: const Color(0xFF075B46),
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+                SizedBox(height: compact ? 10 : 16),
+                Text(
+                  'Capture your\nhome-cooked meal',
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    color: const Color(0xFF063F32),
+                    fontSize: compact ? 29 : 34,
+                    height: 1.08,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.6,
+                  ),
+                ),
+                SizedBox(height: compact ? 8 : 12),
+                const Text(
+                  'Choose a meal type and photo. Groq suggests visible foods; '
+                  'review every item and portion before nutrition is calculated '
+                  'from USDA records. Food photos are not saved.',
+                  style: TextStyle(
+                    color: Color(0xFF69736F),
+                    fontSize: 14,
+                    height: 1.42,
+                  ),
+                ),
+                SizedBox(height: compact ? 15 : 21),
+                Text(
+                  'MEAL TYPE',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: const Color(0xFF52625A),
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+                const SizedBox(height: 9),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 7,
+                  children: [
+                    for (final type in const {
+                      'breakfast': ('Breakfast', Icons.wb_sunny_outlined),
+                      'lunch': ('Lunch', Icons.restaurant_outlined),
+                      'dinner': ('Dinner', Icons.dark_mode_outlined),
+                      'snack': ('Snack', Icons.apple_outlined),
+                    }.entries)
+                      _MealTypePill(
+                        label: type.value.$1,
+                        icon: type.value.$2,
+                        selected: _mealType == type.key,
+                        compact: compact,
+                        onTap: _busy
+                            ? null
+                            : () => setState(() => _mealType = type.key),
+                      ),
+                  ],
+                ),
+                SizedBox(height: compact ? 15 : 21),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _MealPhotoActionCard(
+                        title: 'Take photo',
+                        description: 'Use your camera to capture your meal',
+                        icon: Icons.camera_alt_outlined,
+                        background: const Color(0xFFEAF2E9),
+                        compact: compact,
+                        onTap: _busy
+                            ? null
+                            : () => _pickPhoto(ImageSource.camera),
+                      ),
                     ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _MealPhotoActionCard(
+                        title: 'Choose photo',
+                        description: 'Select from your gallery',
+                        icon: Icons.photo_library_outlined,
+                        background: const Color(0xFFFFF8EC),
+                        compact: compact,
+                        onTap: _busy
+                            ? null
+                            : () => _pickPhoto(ImageSource.gallery),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_photo case final photo?) ...[
+                  const SizedBox(height: 14),
+                  FutureBuilder(
+                    future: photo.readAsBytes(),
+                    builder: (context, snapshot) => snapshot.hasData
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(18),
+                            child: Image.memory(
+                              snapshot.data!,
+                              height: compact ? 150 : 220,
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        : const LinearProgressIndicator(),
+                  ),
+                  const SizedBox(height: 10),
+                  FilledButton.icon(
+                    onPressed: _busy ? null : _identifyMeal,
+                    icon: const Icon(Icons.auto_awesome),
+                    label: const Text('Identify meal with AI'),
+                  ),
+                ],
+                if (_components.isEmpty)
+                  if (_message case final message?) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      message,
+                      style: TextStyle(
+                        color: _messageIsError
+                            ? Theme.of(context).colorScheme.error
+                            : const Color(0xFF52625A),
+                      ),
+                    ),
+                  ],
+                if (_components.isNotEmpty) ...[
+                  const SizedBox(height: 18),
+                  TextField(
+                    controller: _mealName,
+                    decoration: const InputDecoration(
+                      labelText: 'Meal name — confirm or edit',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Edit every suggested item. Vision cannot reliably know hidden ingredients, oil, salt, or portion weight.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  Text(
+                    'Quick sizes are starting estimates. You can edit grams or enter pieces with grams per piece.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.sage,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(message),
-                        if (_messageIsError && !_busy) ...[
-                          const SizedBox(height: 6),
-                          TextButton(
-                            onPressed: _analyzeMeal,
-                            style: TextButton.styleFrom(
-                              foregroundColor: _messageIsError
+                        const Icon(
+                          Icons.fact_check_outlined,
+                          color: AppTheme.green,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'We look up nutrition for each food you confirm. Choose one matching result for every item ($matchedCount of ${_components.length} matched).',
+                            style: const TextStyle(
+                              color: AppTheme.green,
+                              fontWeight: FontWeight.w600,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  for (var index = 0; index < _components.length; index++) ...[
+                    const SizedBox(height: 14),
+                    _componentEditor(_components[index], index),
+                  ],
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _components.length >= 10
+                        ? null
+                        : () => setState(
+                            () => _components.add(_MealComponentDraft()),
+                          ),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add a food item'),
+                  ),
+                  if (_message case final message? when message.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _busy
+                            ? AppTheme.sage
+                            : _messageIsError
+                            ? Theme.of(context).colorScheme.errorContainer
+                            : AppTheme.sage,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: [
+                          if (_busy)
+                            const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          else
+                            Icon(
+                              _messageIsError
+                                  ? Icons.error_outline
+                                  : Icons.check_circle_outline,
+                              color: _messageIsError
                                   ? Theme.of(
                                       context,
                                     ).colorScheme.onErrorContainer
                                   : AppTheme.green,
-                              padding: EdgeInsets.zero,
-                              minimumSize: const Size(0, 36),
-                              alignment: Alignment.centerLeft,
                             ),
-                            child: const Text('Try again'),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(message),
+                                if (_messageIsError && !_busy) ...[
+                                  const SizedBox(height: 6),
+                                  TextButton(
+                                    onPressed: _analyzeMeal,
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: _messageIsError
+                                          ? Theme.of(
+                                              context,
+                                            ).colorScheme.onErrorContainer
+                                          : AppTheme.green,
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: const Size(0, 36),
+                                      alignment: Alignment.centerLeft,
+                                    ),
+                                    child: const Text('Try again'),
+                                  ),
+                                ],
+                              ],
+                            ),
                           ),
                         ],
-                      ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  FilledButton.icon(
+                    onPressed: _busy ? null : _analyzeMeal,
+                    icon: _busy
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.analytics_outlined),
+                    label: Text(
+                      matchedCount == _components.length
+                          ? 'Calculate & save meal'
+                          : 'Find nutrition info ($matchedCount of ${_components.length})',
                     ),
                   ),
                 ],
-              ),
+              ],
             ),
           ],
-          const SizedBox(height: 14),
-          FilledButton.icon(
-            onPressed: _busy ? null : _analyzeMeal,
-            icon: _busy
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.analytics_outlined),
-            label: Text(
-              matchedCount == _components.length
-                  ? 'Calculate & save meal'
-                  : 'Find nutrition info ($matchedCount of ${_components.length})',
-            ),
-          ),
-        ],
-      ],
+        );
+      },
     );
   }
 
@@ -911,11 +1002,50 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
           ),
         ),
         const SizedBox(height: 8),
+        Text(
+          'A healthier option for your goal',
+          style: Theme.of(
+            context,
+          ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 8),
         Card(
+          color: AppTheme.sage,
           child: Padding(
             padding: const EdgeInsets.all(16),
-            child: Text(result.alternativeGuidance),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.lightbulb_outline, color: AppTheme.green),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    result.goalAlternative,
+                    style: const TextStyle(height: 1.4),
+                  ),
+                ),
+              ],
+            ),
           ),
+        ),
+        if (result.alternativeProduct case final product?) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Product to compare',
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          AlternativeProductCard(product: product),
+        ] else if (result.alternativeProductNotice case final notice?) ...[
+          const SizedBox(height: 8),
+          Text(notice, style: Theme.of(context).textTheme.bodySmall),
+        ],
+        const SizedBox(height: 8),
+        Text(
+          'Suggestion only. The nutrition estimate above is based on your confirmed foods and portions; this alternative is not nutritionally verified.',
+          style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 8),
         const Text(
@@ -976,6 +1106,181 @@ class _MealScanScreenState extends ConsumerState<MealScanScreen> {
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MealTypePill extends StatelessWidget {
+  const _MealTypePill({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.compact,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final bool compact;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = selected ? Colors.white : const Color(0xFF075B46);
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: Material(
+        color: selected ? const Color(0xFF075B46) : const Color(0xFFFAFBF8),
+        borderRadius: BorderRadius.circular(24),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(24),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 42),
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 10 : 13,
+              vertical: 8,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: selected
+                    ? const Color(0xFF075B46)
+                    : const Color(0xFFD5E1D7),
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 17, color: foreground),
+                const SizedBox(width: 5),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: foreground,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (selected) ...[
+                  const SizedBox(width: 4),
+                  const Icon(Icons.check_rounded, size: 15),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MealPhotoActionCard extends StatelessWidget {
+  const _MealPhotoActionCard({
+    required this.title,
+    required this.description,
+    required this.icon,
+    required this.background,
+    required this.compact,
+    required this.onTap,
+  });
+
+  final String title;
+  final String description;
+  final IconData icon;
+  final Color background;
+  final bool compact;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: '$title. $description',
+      child: Material(
+        color: background,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(18),
+          child: Container(
+            height: compact ? 142 : 164,
+            padding: EdgeInsets.all(compact ? 11 : 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFFE5E9E2)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x0A17251F),
+                  blurRadius: 12,
+                  offset: Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: compact ? 38 : 44,
+                      height: compact ? 38 : 44,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFDDEBE0),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        icon,
+                        color: const Color(0xFF075B46),
+                        size: compact ? 21 : 24,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.78),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.arrow_forward_rounded,
+                        color: Color(0xFF075B46),
+                        size: 16,
+                      ),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xFF14251F),
+                    fontSize: compact ? 14 : 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xFF69736F),
+                    fontSize: compact ? 11 : 12,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

@@ -50,6 +50,10 @@ class UserProfile(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(100))
     goal: Mapped[Optional[str]] = mapped_column(String(30))
+    age: Mapped[Optional[int]] = mapped_column(Integer)
+    gender: Mapped[Optional[str]] = mapped_column(String(30))
+    height_cm: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2))
+    weight_kg: Mapped[Optional[Decimal]] = mapped_column(Numeric(6, 2))
     daily_calorie_goal: Mapped[Optional[int]] = mapped_column(Integer)
     daily_protein_goal_g: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
     daily_carbohydrate_goal_g: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
@@ -136,6 +140,10 @@ class PackagedScanDetails(Base):
     nutrition_basis: Mapped[str] = mapped_column(String(20))
     goal_insight: Mapped[Optional[str]] = mapped_column(String(1000))
     llm_explanation: Mapped[Optional[str]] = mapped_column(String(2000))
+    goal_alternative: Mapped[Optional[str]] = mapped_column(String(1000))
+    alternative_product: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSON, nullable=True
+    )
     energy_kcal: Mapped[Optional[Decimal]] = mapped_column(Numeric(9, 2))
     protein_g: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
     carbohydrates_g: Mapped[Optional[Decimal]] = mapped_column(Numeric(8, 2))
@@ -163,6 +171,9 @@ class MealScanDetails(Base):
     nutrition_totals: Mapped[dict[str, object]] = mapped_column(JSON)
     goal_explanation: Mapped[str] = mapped_column(String(2000))
     alternative_guidance: Mapped[str] = mapped_column(String(1000))
+    alternative_product: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSON, nullable=True
+    )
     scan: Mapped[FoodScan] = relationship(back_populates="meal_details")
 
 

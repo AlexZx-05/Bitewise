@@ -15,7 +15,7 @@
 	<key>CFBundleName</key>
 	<string>mobile</string>
 	<key>NSCameraUsageDescription</key>
-	<string>FoodScan uses the camera to identify foods in your meal photo.</string>
+	<string>FoodScan uses the camera to photograph food labels and meal photos for analysis.</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../profile/data/profile_repository.dart';
+import 'alternative_product.dart';
 
 String todayMealDiaryKey() {
   final now = DateTime.now();
@@ -42,6 +43,8 @@ class MealScanResult {
     required this.nutritionTotals,
     required this.goalExplanation,
     required this.alternativeGuidance,
+    this.alternativeProduct,
+    this.alternativeProductNotice,
   });
 
   final String scanId;
@@ -52,6 +55,10 @@ class MealScanResult {
   final Map<String, dynamic> nutritionTotals;
   final String goalExplanation;
   final String alternativeGuidance;
+  final AlternativeProduct? alternativeProduct;
+  final String? alternativeProductNotice;
+
+  String get goalAlternative => alternativeGuidance;
 
   factory MealScanResult.fromJson(Map<String, dynamic> json) => MealScanResult(
     scanId: json['scan_id'] as String,
@@ -63,6 +70,12 @@ class MealScanResult {
     nutritionTotals: (json['nutrition_totals'] as Map<String, dynamic>),
     goalExplanation: json['goal_explanation'] as String,
     alternativeGuidance: json['alternative_guidance'] as String,
+    alternativeProduct: json['alternative_product'] == null
+        ? null
+        : AlternativeProduct.fromJson(
+            json['alternative_product'] as Map<String, dynamic>,
+          ),
+    alternativeProductNotice: json['alternative_product_notice'] as String?,
   );
 }
 

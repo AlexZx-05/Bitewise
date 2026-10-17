@@ -1,3 +1,5 @@
+import 'alternative_product.dart';
+
 class PackagedScan {
   const PackagedScan({
     required this.scanId,
@@ -6,6 +8,10 @@ class PackagedScan {
     required this.findings,
     required this.goalInsight,
     this.llmExplanation,
+    this.goalAlternative,
+    this.analysisNotice,
+    this.alternativeProduct,
+    this.alternativeProductNotice,
   });
 
   final String scanId;
@@ -14,6 +20,10 @@ class PackagedScan {
   final List<ScanFinding> findings;
   final String goalInsight;
   final String? llmExplanation;
+  final String? goalAlternative;
+  final String? analysisNotice;
+  final AlternativeProduct? alternativeProduct;
+  final String? alternativeProductNotice;
 
   factory PackagedScan.fromJson(Map<String, dynamic> json) {
     return PackagedScan(
@@ -25,6 +35,14 @@ class PackagedScan {
           .toList(),
       goalInsight: json['goal_insight'] as String,
       llmExplanation: json['llm_explanation'] as String?,
+      goalAlternative: json['goal_alternative'] as String?,
+      analysisNotice: json['analysis_notice'] as String?,
+      alternativeProduct: json['alternative_product'] == null
+          ? null
+          : AlternativeProduct.fromJson(
+              json['alternative_product'] as Map<String, dynamic>,
+            ),
+      alternativeProductNotice: json['alternative_product_notice'] as String?,
     );
   }
 }

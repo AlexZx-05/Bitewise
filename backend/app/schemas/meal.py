@@ -4,6 +4,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.schemas.scan import AlternativeProductRead
+
 
 class MealComponentSuggestion(BaseModel):
     food_name: str = Field(min_length=1, max_length=200)
@@ -196,6 +198,8 @@ class MealScanRead(BaseModel):
     nutrition_totals: dict[str, Decimal]
     goal_explanation: str
     alternative_guidance: str
+    alternative_product: Optional[AlternativeProductRead] = None
+    alternative_product_notice: Optional[str] = None
 
 
 class MealDiaryRead(BaseModel):

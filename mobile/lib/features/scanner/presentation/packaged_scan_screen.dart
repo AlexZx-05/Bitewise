@@ -10,6 +10,7 @@ import '../data/label_ocr_parser.dart';
 import '../data/ocr_service.dart';
 import '../data/packaged_scan.dart';
 import '../data/packaged_scan_repository.dart';
+import 'alternative_product_card.dart';
 
 const _maximumLabelPhotos = 3;
 
@@ -99,6 +100,36 @@ class _PackagedScanScreenState extends ConsumerState<PackagedScanScreen> {
       if (mounted) {
         setState(
           () => _errorMessage = 'Could not open the image picker: $error',
+        );
+      }
+    }
+  }
+
+  Future<void> _openCamera() async {
+    if (_photos.length >= _maximumLabelPhotos) return;
+    final file = await context.push<XFile>('/scan/packaged/camera');
+    if (file == null) return;
+
+    try {
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _photos.add(
+          _LabelPhoto(
+            name: file.name,
+            mimeType: file.mimeType ?? 'image/jpeg',
+            bytes: bytes,
+          ),
+        );
+        _errorMessage = null;
+        _ocrMessage = null;
+        _extractionFailed = false;
+        _quotaExceeded = false;
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _errorMessage = 'Could not load the selected photo: $error',
         );
       }
     }
@@ -393,7 +424,23 @@ class _PackagedScanScreenState extends ConsumerState<PackagedScanScreen> {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
-          onPressed: () => context.pop(),
+          onPressed: () {
+            if (result != null) {
+              setState(() {
+                _result = null;
+                _showReview = true;
+                _reviewConfirmed = true;
+                _errorMessage = null;
+              });
+            } else if (_showReview) {
+              setState(() {
+                _showReview = false;
+                _errorMessage = null;
+              });
+            } else {
+              context.pop();
+            }
+          },
           icon: const Icon(Icons.arrow_back),
           tooltip: 'Back',
         ),
@@ -409,8 +456,12 @@ class _PackagedScanScreenState extends ConsumerState<PackagedScanScreen> {
             child: result != null
                 ? _ScanResults(
                     result: result,
+                    uploadedImage: _photos.isEmpty ? null : _photos.first.bytes,
+                    uploadedImageName: _photos.isEmpty
+                        ? null
+                        : _photos.first.name,
                     onAnotherScan: _startAnotherScan,
-                    onDone: () => context.pop(),
+                    onDone: () => context.go('/home'),
                   )
                 : _showReview
                 ? _buildReviewStep()
@@ -422,364 +473,570 @@ class _PackagedScanScreenState extends ConsumerState<PackagedScanScreen> {
   }
 
   Widget _buildPhotoStep() {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(22, 14, 22, 28),
+    final screenSize = MediaQuery.sizeOf(context);
+    final width = screenSize.width;
+    final compact = width < 420;
+    final dense = screenSize.height < 850;
+    final headingSize = dense
+        ? 30.0
+        : compact
+        ? 32.0
+        : 40.0;
+    final bodySize = dense
+        ? 15.0
+        : compact
+        ? 16.0
+        : 19.0;
+    final noteSize = dense
+        ? 12.0
+        : compact
+        ? 13.0
+        : 16.0;
+
+    return Stack(
       children: [
-        const _StepIndicator(step: 1),
-        const SizedBox(height: 18),
-        Text(
-          'Capture the label',
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            color: AppTheme.charcoal,
-            fontWeight: FontWeight.w800,
-          ),
+        const Positioned.fill(
+          child: IgnorePointer(child: _BotanicalBackground()),
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Photograph the ingredients and nutrition panel. They may be on different sides of the package.',
-          style: TextStyle(
-            color: AppTheme.charcoal.withValues(alpha: 0.72),
-            height: 1.4,
+        ListView(
+          padding: EdgeInsets.fromLTRB(
+            compact ? 22 : 26,
+            dense ? 8 : 14,
+            compact ? 22 : 26,
+            dense ? 14 : 30,
           ),
-        ),
-        const SizedBox(height: 14),
-        Text(
-          kIsWeb
-              ? 'Up to 3 JPEG or PNG photos are sent securely to the FoodScan backend for Groq vision extraction. They are not saved; only the details you confirm are stored.'
-              : 'Native camera and OCR support will be added after this web prototype.',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: AppTheme.charcoal.withValues(alpha: 0.68),
-            height: 1.35,
-          ),
-        ),
-        const SizedBox(height: 18),
-        const _CaptureGuidance(),
-        const SizedBox(height: 18),
-        OutlinedButton.icon(
-          onPressed: _photos.length >= _maximumLabelPhotos ? null : _addPhotos,
-          icon: const Icon(Icons.add_photo_alternate_outlined),
-          label: Text(
-            _photos.isEmpty ? 'Choose label photos' : 'Add another label photo',
-          ),
-          style: OutlinedButton.styleFrom(
-            foregroundColor: AppTheme.green,
-            minimumSize: const Size.fromHeight(52),
-            side: const BorderSide(color: AppTheme.green),
-          ),
-        ),
-        if (_photos.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(
-            '${_photos.length} of $_maximumLabelPhotos photos selected',
-            style: const TextStyle(
-              color: AppTheme.charcoal,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 126,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: _photos.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 10),
-              itemBuilder: (context, index) => _PhotoThumbnail(
-                photo: _photos[index],
-                onRemove: () => _removePhoto(index),
+          children: [
+            const _StepIndicator(step: 1),
+            SizedBox(height: dense ? 14 : 28),
+            Text(
+              'Capture the label',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                color: const Color(0xFF101820),
+                fontSize: headingSize,
+                height: dense ? 1.02 : 1.08,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.8,
               ),
             ),
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: _isReading ? null : _extractLabelWithVision,
-            icon: _isReading
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.auto_awesome_outlined),
-            label: Text(
-              _isReading ? 'Extracting label…' : 'Extract label with AI',
-            ),
-          ),
-          TextButton(
-            onPressed: _isReading ? null : _readLabelText,
-            child: const Text('Use local OCR as a fallback'),
-          ),
-          TextButton(
-            onPressed: _isReading ? null : () => _openReview(manually: true),
-            child: const Text('Enter details manually'),
-          ),
-        ],
-        if (_ocrMessage case final message?) ...[
-          const SizedBox(height: 8),
-          if (_extractionFailed)
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF4E5),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFF0D4A8)),
+            SizedBox(height: dense ? 8 : 14),
+            Text(
+              'Photograph the ingredients and nutrition panel. They may be on different sides of the package.',
+              style: TextStyle(
+                color: const Color(0xFF626C72),
+                fontSize: bodySize,
+                height: dense ? 1.3 : 1.42,
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.cloud_off_outlined,
-                        color: Color(0xFF8A5A13),
-                        size: 20,
-                      ),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _quotaExceeded
-                              ? 'AI quota reached'
-                              : 'AI extraction did not finish',
+            ),
+            SizedBox(height: dense ? 12 : 22),
+            Text(
+              'Up to 3 JPEG or PNG photos can be uploaded for ingredient and nutrition analysis. Your scan is saved after you review and confirm the details.',
+              style: TextStyle(
+                color: const Color(0xFF808991),
+                fontSize: noteSize,
+                height: dense ? 1.3 : 1.45,
+              ),
+            ),
+            SizedBox(
+              height: dense
+                  ? 14
+                  : compact
+                  ? 22
+                  : 30,
+            ),
+            const _CaptureGuidance(),
+            SizedBox(
+              height: dense
+                  ? 12
+                  : compact
+                  ? 20
+                  : 28,
+            ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final tight = constraints.maxWidth < 330;
+                final buttonTextSize = tight
+                    ? 13.0
+                    : compact
+                    ? 14.0
+                    : 17.0;
+                final horizontalPadding = tight
+                    ? 8.0
+                    : compact
+                    ? 10.0
+                    : 18.0;
+                return Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _photos.length >= _maximumLabelPhotos
+                            ? null
+                            : _addPhotos,
+                        icon: Icon(
+                          Icons.add_photo_alternate_outlined,
+                          size: compact ? 21 : 26,
+                        ),
+                        label: Text(
+                          'Choose photos',
+                          maxLines: 1,
+                          softWrap: false,
                           style: TextStyle(
-                            color: Color(0xFF68420D),
+                            fontSize: buttonTextSize,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF075B45),
+                          minimumSize: Size.fromHeight(
+                            dense
+                                ? 54
+                                : compact
+                                ? 58
+                                : 76,
+                          ),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
+                          ),
+                          side: const BorderSide(
+                            color: Color(0xFF075B45),
+                            width: 1.6,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                        ),
                       ),
+                    ),
+                    SizedBox(width: compact ? 10 : 14),
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: _photos.length >= _maximumLabelPhotos
+                            ? null
+                            : _openCamera,
+                        icon: Icon(
+                          Icons.camera_alt_outlined,
+                          size: compact ? 21 : 26,
+                        ),
+                        label: Text(
+                          'Take photo',
+                          maxLines: 1,
+                          softWrap: false,
+                          style: TextStyle(
+                            fontSize: buttonTextSize,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF075B45),
+                          foregroundColor: Colors.white,
+                          minimumSize: Size.fromHeight(
+                            dense
+                                ? 54
+                                : compact
+                                ? 58
+                                : 76,
+                          ),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: horizontalPadding,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
+            if (_photos.isNotEmpty) ...[
+              const SizedBox(height: 18),
+              Text(
+                '${_photos.length} of $_maximumLabelPhotos photos selected',
+                style: const TextStyle(
+                  color: AppTheme.charcoal,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 126,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _photos.length,
+                  separatorBuilder: (context, index) =>
+                      const SizedBox(width: 10),
+                  itemBuilder: (context, index) => _PhotoThumbnail(
+                    photo: _photos[index],
+                    onRemove: () => _removePhoto(index),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton.icon(
+                onPressed: _isReading ? null : _extractLabelWithVision,
+                icon: _isReading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.auto_awesome_outlined),
+                label: Text(
+                  _isReading ? 'Extracting label…' : 'Extract label with AI',
+                ),
+              ),
+              TextButton(
+                onPressed: _isReading ? null : _readLabelText,
+                child: const Text('Use local OCR as a fallback'),
+              ),
+              TextButton(
+                onPressed: _isReading
+                    ? null
+                    : () => _openReview(manually: true),
+                child: const Text('Enter details manually'),
+              ),
+            ],
+            SizedBox(height: dense ? 12 : 22),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.only(top: 1),
+                  child: Icon(
+                    Icons.info_rounded,
+                    color: Color(0xFF899398),
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Some packages print ingredients and nutrition facts on different sides.',
+                    style: TextStyle(
+                      color: const Color(0xFF808991),
+                      fontSize: noteSize,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (_ocrMessage case final message?) ...[
+              const SizedBox(height: 12),
+              if (_extractionFailed)
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF4E5),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFF0D4A8)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.cloud_off_outlined,
+                            color: Color(0xFF8A5A13),
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _quotaExceeded
+                                  ? 'AI quota reached'
+                                  : 'AI extraction did not finish',
+                              style: const TextStyle(
+                                color: Color(0xFF68420D),
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '$message Your photos are still selected.',
+                        style: const TextStyle(
+                          color: Color(0xFF68420D),
+                          height: 1.4,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      if (_quotaExceeded)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: FilledButton.icon(
+                            onPressed: _isReading ? null : _readLabelText,
+                            icon: const Icon(Icons.document_scanner_outlined),
+                            label: const Text('Use local OCR now'),
+                          ),
+                        )
+                      else
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: _isReading
+                                ? null
+                                : _extractLabelWithVision,
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Try again'),
+                          ),
+                        ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '$message Your photos are still selected.',
-                    style: const TextStyle(
-                      color: Color(0xFF68420D),
-                      height: 1.4,
-                    ),
+                )
+              else
+                Text(
+                  message,
+                  style: TextStyle(
+                    color: AppTheme.charcoal.withValues(alpha: 0.75),
                   ),
-                  const SizedBox(height: 4),
-                  if (_quotaExceeded)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: FilledButton.icon(
-                        onPressed: _isReading ? null : _readLabelText,
-                        icon: const Icon(Icons.document_scanner_outlined),
-                        label: const Text('Use local OCR now'),
-                      ),
-                    )
-                  else
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: _isReading ? null : _extractLabelWithVision,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Try again'),
-                      ),
-                    ),
-                ],
-              ),
-            )
-          else
-            Text(
-              message,
-              style: TextStyle(
-                color: AppTheme.charcoal.withValues(alpha: 0.75),
-              ),
-            ),
-        ],
-        if (_errorMessage case final message?) ...[
-          const SizedBox(height: 8),
-          _ErrorBanner(message: message),
-        ],
+                ),
+            ],
+            if (_errorMessage case final message?) ...[
+              const SizedBox(height: 8),
+              _ErrorBanner(message: message),
+            ],
+          ],
+        ),
       ],
     );
   }
 
   Widget _buildReviewStep() {
+    final hasExtractionNotices =
+        (_extractionNote?.isNotEmpty ?? false) ||
+        _uncertainFields.isNotEmpty ||
+        _missingFields.isNotEmpty ||
+        (_ocrMessage?.isNotEmpty ?? false);
+
     return Form(
       key: _formKey,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(22, 14, 22, 28),
         children: [
           const _StepIndicator(step: 2),
-          const SizedBox(height: 18),
+          const SizedBox(height: 22),
           Text(
             'Review the label',
             style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-              color: AppTheme.charcoal,
+              color: const Color(0xFF101820),
+              fontSize: 32,
+              height: 1.1,
               fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Text(
             'We filled in details the vision model could read. Confirm or correct each field against the photos. Anything not detected stays blank.',
             style: TextStyle(
-              color: AppTheme.charcoal.withValues(alpha: 0.72),
+              color: const Color(0xFF59656D),
+              fontSize: 16,
               height: 1.4,
             ),
           ),
           if (_extractionNote case final note? when note.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _NoticeBanner(message: note),
+            const SizedBox(height: 12),
+            _ExtractionNoticeCard(message: note),
           ],
           if (_uncertainFields.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            _NoticeBanner(
+            const SizedBox(height: 10),
+            _ExtractionNoticeCard(
               message:
                   'Please double-check uncertain fields: ${_uncertainFields.join(', ')}.',
             ),
           ],
           if (_missingFields.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              'Not detected in these photos: ${_missingFields.join(', ')}. '
-              'Add another clear photo or leave these values blank.',
-              style: Theme.of(context).textTheme.bodySmall,
+            const SizedBox(height: 10),
+            _ExtractionNoticeCard(
+              message:
+                  'Not detected in these photos: ${_missingFields.join(', ')}. '
+                  'Add another clear photo or leave these values blank.',
             ),
           ],
           if (_ocrMessage case final message?) ...[
+            const SizedBox(height: 10),
+            _ExtractionNoticeCard(message: message),
+          ],
+          if (!hasExtractionNotices) ...[
             const SizedBox(height: 12),
-            _NoticeBanner(message: message),
+            const _ExtractionNoticeCard(
+              message:
+                  'Review every value against the package label. Undetected details are left blank.',
+            ),
           ],
           if (_ocrText.text.trim().isNotEmpty) ...[
             const SizedBox(height: 12),
-            ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              title: const Text('Review OCR text'),
-              subtitle: const Text('Edit or copy values from this text'),
-              children: [
-                TextFormField(
-                  controller: _ocrText,
-                  minLines: 4,
-                  maxLines: 10,
-                  decoration: const InputDecoration(
-                    hintText: 'Text read from your label photos',
-                    border: OutlineInputBorder(),
-                  ),
+            Card(
+              child: ExpansionTile(
+                tilePadding: const EdgeInsets.symmetric(horizontal: 16),
+                title: const Text(
+                  'Review OCR text',
+                  style: TextStyle(fontWeight: FontWeight.w700),
                 ),
-              ],
+                subtitle: const Text('Edit or copy values from this text'),
+                childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                children: [
+                  TextFormField(
+                    controller: _ocrText,
+                    minLines: 4,
+                    maxLines: 10,
+                    decoration: _reviewInputDecoration(
+                      controller: _ocrText,
+                      hint: 'Text read from your label photos',
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
-          const SizedBox(height: 10),
-          _sectionHeading('Product details'),
-          const SizedBox(height: 10),
-          TextFormField(
-            controller: _productName,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-              labelText: 'Product name *',
-              border: OutlineInputBorder(),
-            ),
-            validator: (value) => value == null || value.trim().isEmpty
-                ? 'Enter the product name from the package.'
-                : null,
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _declaredAllergens,
-            decoration: const InputDecoration(
-              labelText: 'Declared allergens (optional)',
-              hintText: 'e.g. Milk, peanuts',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _brand,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-              labelText: 'Brand (optional)',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 18),
-          _sectionHeading('Serving and nutrition'),
-          const SizedBox(height: 10),
-          TextFormField(
-            controller: _servingSize,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Serving size in grams *',
-              hintText: 'e.g. 40',
-              border: OutlineInputBorder(),
-            ),
-            validator: (value) {
-              final number = double.tryParse(value ?? '');
-              if (number == null || !number.isFinite || number <= 0) {
-                return 'Enter the serving size printed on the package.';
-              }
-              return null;
-            },
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _nutritionBasis,
-            decoration: const InputDecoration(
-              labelText: 'Nutrition values are shown',
-              border: OutlineInputBorder(),
-            ),
-            items: const [
-              DropdownMenuItem(
-                value: 'per_serving',
-                child: Text('Per serving'),
+          const SizedBox(height: 14),
+          _ReviewSectionCard(
+            title: 'Product details',
+            icon: Icons.shopping_bag_outlined,
+            children: [
+              TextFormField(
+                controller: _productName,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.next,
+                decoration: _reviewInputDecoration(
+                  controller: _productName,
+                  label: 'Product name *',
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Enter the product name from the package.'
+                    : null,
               ),
-              DropdownMenuItem(value: 'per_100g', child: Text('Per 100 g')),
+              TextFormField(
+                controller: _declaredAllergens,
+                textInputAction: TextInputAction.next,
+                decoration: _reviewInputDecoration(
+                  controller: _declaredAllergens,
+                  label: 'Declared allergens (optional)',
+                  hint: 'e.g. Milk, peanuts',
+                ),
+              ),
+              TextFormField(
+                controller: _brand,
+                textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.done,
+                decoration: _reviewInputDecoration(
+                  controller: _brand,
+                  label: 'Brand (optional)',
+                ),
+              ),
             ],
-            onChanged: (value) {
-              if (value != null) setState(() => _nutritionBasis = value);
-            },
-          ),
-          const SizedBox(height: 12),
-          _OptionalNumberField(
-            controller: _energy,
-            label: 'Energy (kcal)',
-            hint: 'Not detected? Leave blank',
-          ),
-          const SizedBox(height: 10),
-          _OptionalNumberField(controller: _protein, label: 'Protein (g)'),
-          const SizedBox(height: 10),
-          _OptionalNumberField(
-            controller: _carbohydrates,
-            label: 'Carbohydrates (g)',
-          ),
-          const SizedBox(height: 10),
-          _OptionalNumberField(controller: _fat, label: 'Total fat (g)'),
-          const SizedBox(height: 10),
-          _OptionalNumberField(controller: _sodium, label: 'Sodium (mg)'),
-          const SizedBox(height: 18),
-          _sectionHeading('Ingredients and warnings'),
-          const SizedBox(height: 10),
-          TextFormField(
-            controller: _ingredients,
-            minLines: 3,
-            maxLines: 7,
-            decoration: const InputDecoration(
-              labelText: 'Ingredients (optional)',
-              hintText: 'Enter ingredients separated by commas or new lines',
-              alignLabelWithHint: true,
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _precautionary,
-            maxLines: 2,
-            decoration: const InputDecoration(
-              labelText: 'Precautionary statement (optional)',
-              hintText: 'e.g. May contain peanuts',
-              border: OutlineInputBorder(),
-            ),
           ),
           const SizedBox(height: 14),
-          CheckboxListTile(
-            value: _reviewConfirmed,
-            onChanged: (value) =>
-                setState(() => _reviewConfirmed = value ?? false),
-            contentPadding: EdgeInsets.zero,
-            controlAffinity: ListTileControlAffinity.leading,
-            title: const Text(
-              'I checked these details against the package label.',
-              style: TextStyle(fontWeight: FontWeight.w600),
+          _ReviewSectionCard(
+            title: 'Serving and nutrition',
+            icon: Icons.restaurant_outlined,
+            children: [
+              TextFormField(
+                controller: _servingSize,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                textInputAction: TextInputAction.next,
+                decoration: _reviewInputDecoration(
+                  controller: _servingSize,
+                  label: 'Serving size in grams *',
+                  hint: 'e.g. 40',
+                ),
+                validator: (value) {
+                  final number = double.tryParse(value ?? '');
+                  if (number == null || !number.isFinite || number <= 0) {
+                    return 'Enter the serving size printed on the package.';
+                  }
+                  return null;
+                },
+              ),
+              DropdownButtonFormField<String>(
+                initialValue: _nutritionBasis,
+                decoration: _reviewInputDecoration(
+                  label: 'Nutrition values are shown',
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'per_serving',
+                    child: Text('Per serving'),
+                  ),
+                  DropdownMenuItem(value: 'per_100g', child: Text('Per 100 g')),
+                ],
+                onChanged: (value) {
+                  if (value != null) setState(() => _nutritionBasis = value);
+                },
+              ),
+              _OptionalNumberField(
+                controller: _energy,
+                label: 'Energy (kcal)',
+                hint: 'Not detected? Leave blank',
+              ),
+              _OptionalNumberField(controller: _protein, label: 'Protein (g)'),
+              _OptionalNumberField(
+                controller: _carbohydrates,
+                label: 'Carbohydrates (g)',
+              ),
+              _OptionalNumberField(controller: _fat, label: 'Total fat (g)'),
+              _OptionalNumberField(controller: _sodium, label: 'Sodium (mg)'),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _ReviewSectionCard(
+            title: 'Ingredients and warnings',
+            icon: Icons.fact_check_outlined,
+            children: [
+              TextFormField(
+                controller: _ingredients,
+                minLines: 3,
+                maxLines: 7,
+                textCapitalization: TextCapitalization.sentences,
+                textInputAction: TextInputAction.next,
+                decoration: _reviewInputDecoration(
+                  controller: _ingredients,
+                  label: 'Ingredients (optional)',
+                  hint: 'Enter ingredients separated by commas or new lines',
+                  alignLabelWithHint: true,
+                ),
+              ),
+              TextFormField(
+                controller: _precautionary,
+                minLines: 2,
+                maxLines: 4,
+                textInputAction: TextInputAction.newline,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: _reviewInputDecoration(
+                  controller: _precautionary,
+                  label: 'Precautionary statement (optional)',
+                  hint: 'e.g. May contain peanuts',
+                  alignLabelWithHint: true,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              child: CheckboxListTile(
+                value: _reviewConfirmed,
+                onChanged: (value) =>
+                    setState(() => _reviewConfirmed = value ?? false),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 6),
+                controlAffinity: ListTileControlAffinity.leading,
+                activeColor: const Color(0xFF075B45),
+                title: const Text(
+                  'I checked these details against the package label.',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
             ),
           ),
           if (_errorMessage case final message?) ...[
@@ -802,6 +1059,14 @@ class _PackagedScanScreenState extends ConsumerState<PackagedScanScreen> {
                   )
                 : const Icon(Icons.analytics_outlined),
             label: Text(_isSubmitting ? 'Saving analysis…' : 'Analyze product'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF075B45),
+              foregroundColor: Colors.white,
+              minimumSize: const Size.fromHeight(54),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
           ),
           TextButton(
             onPressed: _isSubmitting
@@ -814,16 +1079,6 @@ class _PackagedScanScreenState extends ConsumerState<PackagedScanScreen> {
             child: const Text('Back to photos'),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _sectionHeading(String text) {
-    return Text(
-      text,
-      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-        color: AppTheme.charcoal,
-        fontWeight: FontWeight.w800,
       ),
     );
   }
@@ -841,6 +1096,170 @@ class _LabelPhoto {
   final Uint8List bytes;
 }
 
+InputDecoration _reviewInputDecoration({
+  String? label,
+  TextEditingController? controller,
+  String? hint,
+  bool alignLabelWithHint = false,
+}) {
+  return InputDecoration(
+    labelText: label,
+    hintText: hint,
+    alignLabelWithHint: alignLabelWithHint,
+    filled: true,
+    fillColor: const Color(0xFFFFFEFC),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: const BorderSide(color: Color(0xFFC5C9C7)),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: const BorderSide(color: Color(0xFFC5C9C7)),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: const BorderSide(color: Color(0xFF075B45), width: 1.6),
+    ),
+    errorBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: const BorderSide(color: Color(0xFFBA1A1A)),
+    ),
+    focusedErrorBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: const BorderSide(color: Color(0xFFBA1A1A), width: 1.6),
+    ),
+    suffixIcon: controller == null
+        ? null
+        : ValueListenableBuilder<TextEditingValue>(
+            valueListenable: controller,
+            builder: (context, value, child) => value.text.isEmpty
+                ? const SizedBox.shrink()
+                : IconButton(
+                    onPressed: controller.clear,
+                    tooltip: 'Clear ${label ?? 'field'}',
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Color(0xFF7A858C),
+                      size: 19,
+                    ),
+                  ),
+          ),
+  );
+}
+
+class _ReviewSectionCard extends StatelessWidget {
+  const _ReviewSectionCard({
+    required this.title,
+    required this.icon,
+    required this.children,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFFEFC),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE7EAE5)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x090F2018),
+            blurRadius: 14,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Color(0xFF101820),
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ),
+              Container(
+                width: 40,
+                height: 40,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFE8F0E9),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: const Color(0xFF075B45), size: 21),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          for (var index = 0; index < children.length; index++) ...[
+            if (index > 0) const SizedBox(height: 12),
+            children[index],
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ExtractionNoticeCard extends StatelessWidget {
+  const _ExtractionNoticeCard({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F0E9),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 28,
+            height: 28,
+            margin: const EdgeInsets.only(top: 1),
+            decoration: const BoxDecoration(
+              color: Color(0xFFD7E7D9),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.info_outline_rounded,
+              color: Color(0xFF075B45),
+              size: 17,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: Color(0xFF315D4E),
+                fontSize: 14,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _StepIndicator extends StatelessWidget {
   const _StepIndicator({required this.step});
 
@@ -848,13 +1267,37 @@ class _StepIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      'STEP $step OF 3',
-      style: const TextStyle(
-        color: AppTheme.green,
-        fontWeight: FontWeight.w800,
-        letterSpacing: 1.2,
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'STEP $step OF 3',
+          style: const TextStyle(
+            color: Color(0xFF075B45),
+            fontSize: 15,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.4,
+          ),
+        ),
+        const SizedBox(height: 14),
+        Row(
+          children: List.generate(
+            3,
+            (index) => Expanded(
+              child: Container(
+                height: 10,
+                margin: EdgeInsets.only(right: index == 2 ? 0 : 10),
+                decoration: BoxDecoration(
+                  color: index < step
+                      ? const Color(0xFF075B45)
+                      : const Color(0xFFDCE4DD),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -864,50 +1307,275 @@ class _CaptureGuidance extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: AppTheme.sage,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            _GuidanceRow(
-              icon: Icons.crop_free,
-              text: 'Keep the full label in frame',
-            ),
-            SizedBox(height: 10),
-            _GuidanceRow(
-              icon: Icons.wb_sunny_outlined,
-              text: 'Use even light and avoid glare or shadows',
-            ),
-            SizedBox(height: 10),
-            _GuidanceRow(
-              icon: Icons.text_fields,
-              text: 'Make the small print as sharp as possible',
-            ),
-          ],
-        ),
+    final screenSize = MediaQuery.sizeOf(context);
+    final compact = screenSize.width < 420;
+    final dense = screenSize.height < 850;
+    return Container(
+      padding: EdgeInsets.all(
+        dense
+            ? 13
+            : compact
+            ? 17
+            : 24,
+      ),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF1F6EC).withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: const Color(0xFFD5E4D4), width: 1.2),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x12075B45),
+            blurRadius: 18,
+            offset: Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: dense
+                    ? 36
+                    : compact
+                    ? 40
+                    : 48,
+                height: dense
+                    ? 36
+                    : compact
+                    ? 40
+                    : 48,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFDDEBDD),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.eco_rounded,
+                  color: const Color(0xFF075B45),
+                  size: dense
+                      ? 21
+                      : compact
+                      ? 24
+                      : 29,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Text(
+                  'Tips for a clear scan',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: const Color(0xFF101820),
+                    fontSize: dense
+                        ? 16
+                        : compact
+                        ? 17
+                        : 22,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.3,
+                  ),
+                ),
+              ),
+              if (!compact) ...[
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Divider(color: Color(0xFFD5E4D4), thickness: 1.4),
+                ),
+              ],
+            ],
+          ),
+          SizedBox(
+            height: dense
+                ? 4
+                : compact
+                ? 8
+                : 16,
+          ),
+          const _GuidanceRow(
+            icon: Icons.crop_free_rounded,
+            title: 'Keep the full label in frame',
+            description: 'Capture all ingredients and nutrition details.',
+          ),
+          const _GuidanceDivider(),
+          const _GuidanceRow(
+            icon: Icons.wb_sunny_outlined,
+            title: 'Use good lighting',
+            description: 'Avoid glare, reflections, and shadows.',
+          ),
+          const _GuidanceDivider(),
+          const _GuidanceRow(
+            icon: Icons.text_fields_rounded,
+            title: 'Keep text sharp',
+            description: 'Make sure small print is readable.',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GuidanceDivider extends StatelessWidget {
+  const _GuidanceDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 62),
+      child: Divider(
+        height: 1,
+        thickness: 1,
+        color: const Color(0xFFD5E4D4).withValues(alpha: 0.85),
       ),
     );
   }
 }
 
 class _GuidanceRow extends StatelessWidget {
-  const _GuidanceRow({required this.icon, required this.text});
+  const _GuidanceRow({
+    required this.icon,
+    required this.title,
+    required this.description,
+  });
 
   final IconData icon;
-  final String text;
+  final String title;
+  final String description;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Icon(icon, color: AppTheme.green, size: 20),
-        const SizedBox(width: 10),
-        Expanded(child: Text(text)),
-      ],
+    final screenSize = MediaQuery.sizeOf(context);
+    final compact = screenSize.width < 420;
+    final dense = screenSize.height < 850;
+    final iconSize = dense
+        ? 38.0
+        : compact
+        ? 48.0
+        : 62.0;
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        vertical: dense
+            ? 6
+            : compact
+            ? 12
+            : 18,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: iconSize,
+            height: iconSize,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFFDDEBDD),
+            ),
+            child: Icon(
+              icon,
+              color: const Color(0xFF075B45),
+              size: dense
+                  ? 21
+                  : compact
+                  ? 25
+                  : 31,
+            ),
+          ),
+          SizedBox(
+            width: dense
+                ? 10
+                : compact
+                ? 12
+                : 18,
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    color: const Color(0xFF101820),
+                    fontSize: dense
+                        ? 14
+                        : compact
+                        ? 14
+                        : 18,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  style: TextStyle(
+                    color: const Color(0xFF626C72),
+                    fontSize: dense
+                        ? 11
+                        : compact
+                        ? 12
+                        : 15,
+                    height: dense ? 1.2 : 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
+}
+
+class _BotanicalBackground extends StatelessWidget {
+  const _BotanicalBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return const CustomPaint(painter: _BotanicalPainter());
+  }
+}
+
+class _BotanicalPainter extends CustomPainter {
+  const _BotanicalPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final fill = Paint()
+      ..color = const Color(0xFFBFD7BD).withValues(alpha: 0.16)
+      ..style = PaintingStyle.fill;
+    final stroke = Paint()
+      ..color = const Color(0xFF8EB28A).withValues(alpha: 0.52)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+
+    void drawLeaf(Offset center, double width, double height, double rotation) {
+      canvas.save();
+      canvas.translate(center.dx, center.dy);
+      canvas.rotate(rotation);
+      final leaf = Path()
+        ..moveTo(0, height / 2)
+        ..cubicTo(
+          -width / 2,
+          height / 5,
+          -width / 2,
+          -height / 3,
+          0,
+          -height / 2,
+        )
+        ..cubicTo(width / 2, -height / 3, width / 2, height / 5, 0, height / 2)
+        ..close();
+      canvas.drawPath(leaf, fill);
+      canvas.drawLine(Offset(0, height / 2), Offset(0, -height / 2), stroke);
+      canvas.restore();
+    }
+
+    drawLeaf(Offset(size.width * 0.98, size.height * 0.13), 58, 150, 0.5);
+    drawLeaf(Offset(size.width * 0.90, size.height * 0.11), 44, 112, -0.48);
+    drawLeaf(Offset(size.width * 1.02, size.height * 0.88), 72, 174, -0.54);
+    drawLeaf(Offset(size.width * 0.91, size.height * 0.91), 46, 124, 0.48);
+  }
+
+  @override
+  bool shouldRepaint(covariant _BotanicalPainter oldDelegate) => false;
 }
 
 class _PhotoThumbnail extends StatelessWidget {
@@ -966,10 +1634,10 @@ class _OptionalNumberField extends StatelessWidget {
     return TextFormField(
       controller: controller,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        border: const OutlineInputBorder(),
+      decoration: _reviewInputDecoration(
+        controller: controller,
+        label: label,
+        hint: hint,
       ),
       validator: (value) {
         if (value == null || value.trim().isEmpty) return null;
@@ -993,19 +1661,6 @@ class _ErrorBanner extends StatelessWidget {
     icon: Icons.error_outline,
     message: message,
     color: Theme.of(context).colorScheme.error,
-  );
-}
-
-class _NoticeBanner extends StatelessWidget {
-  const _NoticeBanner({required this.message});
-
-  final String message;
-
-  @override
-  Widget build(BuildContext context) => _Banner(
-    icon: Icons.info_outline,
-    message: message,
-    color: AppTheme.green,
   );
 }
 
@@ -1045,17 +1700,27 @@ class _Banner extends StatelessWidget {
 class _ScanResults extends StatelessWidget {
   const _ScanResults({
     required this.result,
+    required this.uploadedImage,
+    required this.uploadedImageName,
     required this.onAnotherScan,
     required this.onDone,
   });
 
   final PackagedScan result;
+  final Uint8List? uploadedImage;
+  final String? uploadedImageName;
   final VoidCallback onAnotherScan;
   final VoidCallback onDone;
 
   @override
   Widget build(BuildContext context) {
     final label = result.product;
+    final servingSize = label.servingSizeG.trim();
+    final servingBasis = label.nutritionBasis == 'per_100g'
+        ? 'Per 100 g'
+        : servingSize.isEmpty
+        ? 'Per serving'
+        : 'Per serving ($servingSize g)';
     final facts = <(String, String?)>[
       ('Energy', label.energyKcal == null ? null : '${label.energyKcal} kcal'),
       ('Protein', label.proteinG == null ? null : '${label.proteinG} g'),
@@ -1066,125 +1731,272 @@ class _ScanResults extends StatelessWidget {
       ('Total fat', label.totalFatG == null ? null : '${label.totalFatG} g'),
       ('Sodium', label.sodiumMg == null ? null : '${label.sodiumMg} mg'),
     ];
+    final providedExplanation = result.llmExplanation;
+    final explanation =
+        providedExplanation != null && providedExplanation.trim().isNotEmpty
+        ? providedExplanation
+        : _buildLabelExplanation(label, facts);
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(22, 14, 22, 28),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
       children: [
         const _StepIndicator(step: 3),
-        const SizedBox(height: 18),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label.productName,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: AppTheme.charcoal,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                if (label.brand case final brand?) ...[
-                  const SizedBox(height: 4),
-                  Text(brand),
-                ],
-                const SizedBox(height: 8),
-                Text(
-                  'Serving ${label.servingSizeG} g · '
-                  '${label.nutritionBasis == 'per_100g' ? 'values per 100 g' : 'values per serving'}',
-                  style: const TextStyle(color: AppTheme.green),
-                ),
-              ],
+        const SizedBox(height: 14),
+        _ProductSummaryCard(
+          label: label,
+          servingBasis: servingBasis,
+          image: uploadedImage,
+          imageName: uploadedImageName,
+        ),
+        const SizedBox(height: 12),
+        _ResultSection(
+          icon: Icons.bar_chart_rounded,
+          title: 'Nutrition facts',
+          trailing: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE7F0E6),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Text(
+              servingBasis,
+              style: const TextStyle(
+                color: Color(0xFF075B45),
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-        ),
-        const SizedBox(height: 18),
-        _ResultHeading('Nutrition facts'),
-        const SizedBox(height: 8),
-        Card(
           child: Column(
             children: [
               for (final (index, fact) in facts.indexed)
                 _FactRow(
                   label: fact.$1,
-                  value: fact.$2 ?? 'Not provided',
+                  value: fact.$2 ?? 'Not available',
                   last: index == facts.length - 1,
                 ),
             ],
           ),
         ),
-        const SizedBox(height: 18),
-        _ResultHeading('Ingredients'),
-        const SizedBox(height: 8),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              label.ingredients.isEmpty
-                  ? 'No ingredients were entered from the label.'
-                  : label.ingredients.join(', '),
-            ),
-          ),
-        ),
-        if (label.declaredAllergens.isNotEmpty) ...[
-          const SizedBox(height: 18),
-          _ResultHeading('Declared allergens'),
-          const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(label.declaredAllergens.join(', ')),
-            ),
-          ),
-        ],
-        const SizedBox(height: 18),
-        _ResultHeading('Label findings'),
-        const SizedBox(height: 8),
-        if (result.findings.isEmpty)
-          const _FindingCard(
-            icon: Icons.info_outline,
-            title: 'No supported findings detected',
-            detail:
-                'This does not mean the product is allergen-free. Check the full package label.',
-          )
-        else
-          for (final finding in result.findings) ...[
-            _FindingCard(
-              icon: finding.category.contains('allergen')
-                  ? Icons.warning_amber_rounded
-                  : Icons.notes_outlined,
-              title: finding.label,
-              detail: finding.details ?? '',
-            ),
-            const SizedBox(height: 8),
-          ],
         const SizedBox(height: 12),
-        _ResultHeading('Nutrition context'),
-        const SizedBox(height: 8),
-        _FindingCard(
-          icon: Icons.tips_and_updates_outlined,
-          title: 'Based on your selected goal',
-          detail: result.goalInsight,
+        _ResultSection(
+          icon: Icons.eco_outlined,
+          title: 'Ingredients',
+          child: _IngredientsContent(ingredients: label.ingredients),
         ),
-        if (result.llmExplanation case final explanation?) ...[
-          const SizedBox(height: 18),
-          _ResultHeading('Personalized explanation'),
-          const SizedBox(height: 8),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(explanation),
+        const SizedBox(height: 12),
+        _ResultSection(
+          icon: Icons.shield_outlined,
+          title: 'Declared allergens',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (label.declaredAllergens.isEmpty)
+                const Text(
+                  'No declared allergens detected. This does not confirm that the product is allergen-free.',
+                  style: TextStyle(height: 1.4, color: Color(0xFF66717A)),
+                )
+              else
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final allergen in label.declaredAllergens)
+                      _AllergenChip(label: allergen),
+                  ],
+                ),
+              if (label.precautionaryAllergenStatement case final statement?
+                  when statement.trim().isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF5F2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Precautionary statement',
+                        style: TextStyle(
+                          color: Color(0xFF9D2929),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        statement,
+                        style: const TextStyle(
+                          color: Color(0xFF66717A),
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        _ResultSection(
+          icon: Icons.warning_amber_rounded,
+          title: 'Label findings',
+          iconColor: const Color(0xFFE52424),
+          child: result.findings.isEmpty
+              ? const Text(
+                  'No additional findings were confirmed. Review the full package label, especially if you have an allergy.',
+                  style: TextStyle(height: 1.4, color: Color(0xFF66717A)),
+                )
+              : Column(
+                  children: [
+                    for (final (index, finding) in result.findings.indexed) ...[
+                      _FindingTile(finding: finding),
+                      if (index < result.findings.length - 1)
+                        const SizedBox(height: 6),
+                    ],
+                  ],
+                ),
+        ),
+        const SizedBox(height: 12),
+        _ResultSection(
+          icon: Icons.tips_and_updates_outlined,
+          title: 'Nutrition context',
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE7F0E6),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFD4E7D8),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.lightbulb_outline,
+                    color: AppTheme.green,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Based on your selected goal',
+                        style: TextStyle(
+                          color: Color(0xFF075B45),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        result.goalInsight,
+                        style: const TextStyle(
+                          color: Color(0xFF485B52),
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
-        const SizedBox(height: 22),
-        FilledButton.icon(
-          onPressed: null,
-          icon: const Icon(Icons.bookmark_add_outlined),
-          label: const Text('Save to food diary — coming later'),
         ),
-        const SizedBox(height: 10),
+        if (result.analysisNotice case final notice?
+            when notice.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _FindingCard(
+            icon: Icons.info_outline,
+            title: 'AI guidance unavailable',
+            detail: notice,
+          ),
+        ],
+        const SizedBox(height: 12),
+        _ResultSection(
+          icon: Icons.article_outlined,
+          title: 'Personalized explanation',
+          child: Text(
+            explanation,
+            style: const TextStyle(
+              color: Color(0xFF48515A),
+              height: 1.45,
+              fontSize: 14,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _ResultSection(
+          icon: Icons.spa_outlined,
+          title: 'A healthier option for your goal',
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE7F0E6),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.lightbulb_outline, color: AppTheme.green),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    result.goalAlternative ??
+                        'Compare the serving size and confirmed nutrition values with similar products. Suitability depends on your overall needs and daily targets.',
+                    style: const TextStyle(
+                      color: Color(0xFF485B52),
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'General information only. Check the product’s own label; nutrition and ingredients may vary.',
+          style: TextStyle(
+            color: Color(0xFF66717A),
+            fontSize: 12,
+            height: 1.35,
+          ),
+        ),
+        if (result.alternativeProduct case final product?) ...[
+          const SizedBox(height: 12),
+          const _ResultHeading('Product to compare'),
+          const SizedBox(height: 6),
+          AlternativeProductCard(product: product),
+        ] else if (result.alternativeProductNotice case final notice?
+            when notice.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(
+            notice,
+            style: const TextStyle(color: Color(0xFF66717A), fontSize: 12),
+          ),
+        ],
+        const SizedBox(height: 18),
+        FilledButton.icon(
+          onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Food diary saving is coming soon.')),
+          ),
+          icon: const Icon(Icons.bookmark_add_outlined),
+          label: const Text('Save to food diary · Coming soon'),
+        ),
+        const SizedBox(height: 8),
         OutlinedButton.icon(
           onPressed: onAnotherScan,
           icon: const Icon(Icons.document_scanner_outlined),
@@ -1193,6 +2005,24 @@ class _ScanResults extends StatelessWidget {
         TextButton(onPressed: onDone, child: const Text('Back to home')),
       ],
     );
+  }
+
+  String _buildLabelExplanation(
+    PackagedLabel label,
+    List<(String, String?)> facts,
+  ) {
+    final availableFacts = facts
+        .where((fact) => fact.$2 != null)
+        .map((fact) => '${fact.$1.toLowerCase()}: ${fact.$2}')
+        .toList();
+    final serving = label.servingSizeG.trim().isEmpty
+        ? 'the listed serving'
+        : 'a ${label.servingSizeG} g serving';
+    if (availableFacts.isEmpty) {
+      return 'Nutrition values were not available in the confirmed label data for $serving. Check the package for the complete nutrition information.';
+    }
+    return 'Based on the confirmed label, $serving lists '
+        '${availableFacts.join(', ')}. These values describe the package label and are not a dietary recommendation.';
   }
 }
 
@@ -1209,6 +2039,331 @@ class _ResultHeading extends StatelessWidget {
       fontWeight: FontWeight.w800,
     ),
   );
+}
+
+class _ProductSummaryCard extends StatelessWidget {
+  const _ProductSummaryCard({
+    required this.label,
+    required this.servingBasis,
+    required this.image,
+    required this.imageName,
+  });
+
+  final PackagedLabel label;
+  final String servingBasis;
+  final Uint8List? image;
+  final String? imageName;
+
+  @override
+  Widget build(BuildContext context) {
+    final brand = label.brand?.trim();
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFE9ECE5)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x08000000),
+            blurRadius: 12,
+            offset: Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 72,
+            height: 90,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF0F3ED),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: image == null
+                ? const Icon(
+                    Icons.inventory_2_outlined,
+                    color: Color(0xFF718078),
+                    size: 30,
+                  )
+                : Image.memory(
+                    image!,
+                    fit: BoxFit.cover,
+                    semanticLabel: imageName ?? 'Uploaded product label photo',
+                    errorBuilder: (context, error, stackTrace) => const Icon(
+                      Icons.broken_image_outlined,
+                      color: Color(0xFF718078),
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label.productName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: const Color(0xFF111820),
+                    fontWeight: FontWeight.w700,
+                    height: 1.2,
+                  ),
+                ),
+                if (brand != null && brand.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    brand,
+                    style: const TextStyle(
+                      color: Color(0xFF66717A),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 5),
+                Text(
+                  servingBasis,
+                  style: const TextStyle(
+                    color: Color(0xFF075B45),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 4),
+          const Icon(Icons.chevron_right, color: Color(0xFF46534D)),
+        ],
+      ),
+    );
+  }
+}
+
+class _ResultSection extends StatelessWidget {
+  const _ResultSection({
+    required this.icon,
+    required this.title,
+    required this.child,
+    this.trailing,
+    this.iconColor = const Color(0xFF075B45),
+  });
+
+  final IconData icon;
+  final String title;
+  final Widget child;
+  final Widget? trailing;
+  final Color iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE9ECE5)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x06000000),
+            blurRadius: 10,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: iconColor, size: 23),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: const Color(0xFF111820),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              ?trailing,
+            ],
+          ),
+          const SizedBox(height: 10),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _IngredientsContent extends StatefulWidget {
+  const _IngredientsContent({required this.ingredients});
+
+  final List<String> ingredients;
+
+  @override
+  State<_IngredientsContent> createState() => _IngredientsContentState();
+}
+
+class _IngredientsContentState extends State<_IngredientsContent> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = widget.ingredients.isEmpty
+        ? 'Ingredient information could not be confirmed from the label.'
+        : widget.ingredients.join(', ');
+    final canExpand = text.length > 260;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          text,
+          maxLines: canExpand && !_expanded ? 5 : null,
+          overflow: canExpand && !_expanded ? TextOverflow.ellipsis : null,
+          style: const TextStyle(
+            color: Color(0xFF48515A),
+            height: 1.4,
+            fontSize: 14,
+          ),
+        ),
+        if (canExpand)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: () => setState(() => _expanded = !_expanded),
+              style: TextButton.styleFrom(
+                minimumSize: const Size(44, 40),
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+              ),
+              child: Text(_expanded ? 'Show less' : 'Show more'),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _AllergenChip extends StatelessWidget {
+  const _AllergenChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: const Color(0xFFDCEBFA),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Color(0xFF174A70),
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _FindingTile extends StatelessWidget {
+  const _FindingTile({required this.finding});
+
+  final ScanFinding finding;
+
+  @override
+  Widget build(BuildContext context) {
+    final isAllergen = finding.category.toLowerCase().contains('allergen');
+    final detail = finding.details?.trim();
+    final hasDetail = detail != null && detail.isNotEmpty;
+    final tone = isAllergen ? const Color(0xFFE52424) : const Color(0xFF075B45);
+    return Material(
+      color: isAllergen ? const Color(0xFFFFF5F2) : const Color(0xFFF6F8F5),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: hasDetail
+            ? () => showModalBottomSheet<void>(
+                context: context,
+                showDragHandle: true,
+                builder: (context) => SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          finding.label,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(detail),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            : null,
+        child: Padding(
+          padding: const EdgeInsets.all(11),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                isAllergen ? Icons.warning_amber_rounded : Icons.notes_outlined,
+                color: tone,
+                size: 22,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      finding.label,
+                      style: const TextStyle(
+                        color: Color(0xFF20262B),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (hasDetail) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        detail,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF66717A),
+                          fontSize: 12,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (hasDetail) ...[
+                const SizedBox(width: 4),
+                const Icon(
+                  Icons.chevron_right,
+                  color: Color(0xFF66717A),
+                  size: 21,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _FactRow extends StatelessWidget {

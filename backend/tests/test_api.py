@@ -127,6 +127,137 @@ def test_groq_request_uses_chat_completions_json_mode_and_inline_vision(monkeypa
     )
 
 
+def test_open_food_facts_recommendation_returns_photo_and_goal_ranked_macros(
+    monkeypatch,
+):
+    import asyncio
+
+    from app.services import open_food_facts
+
+    captured = {"calls": []}
+
+    def product(name, energy, protein, *, code, image=True):
+        return {
+            "product_name": name,
+            "brands": "Example",
+            "image_front_url": (
+                f"https://images.openfoodfacts.org/{code}.jpg" if image else None
+            ),
+            "code": code,
+            "nutriments": {
+                "energy-kcal_100g": energy,
+                "proteins_100g": protein,
+                "carbohydrates_100g": 65,
+                "fat_100g": 12,
+            },
+        }
+
+    class FakeResponse:
+        is_error = False
+
+        @staticmethod
+        def json():
+            lower_energy = product(
+                "Lower Energy Crisps",
+                430,
+                7,
+                code="102",
+            )
+            lower_energy["image_front_url"] = (
+                "https://images.openfoodfacts.net/102.jpg"
+            )
+            return {
+                "products": [
+                    product("High Energy Crisps", 520, 8, code="101"),
+                    lower_energy,
+                    product("No Photo Crisps", 300, 9, code="103", image=False),
+                    product("Scanned Crisps", 100, 2, code="104"),
+                ]
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, *, params, headers):
+            captured["calls"].append(params["search_terms"])
+            captured.update(url=url, params=params, headers=headers)
+            return FakeResponse()
+
+    monkeypatch.setattr(open_food_facts.httpx, "AsyncClient", FakeAsyncClient)
+    result = asyncio.run(
+        open_food_facts.find_alternative_product(
+            "potato crisps",
+            "fat_loss",
+            exclude_name="Scanned Crisps",
+        )
+    )
+
+    assert result["product_name"] == "Lower Energy Crisps"
+    assert result["image_url"] == "https://images.openfoodfacts.net/102.jpg"
+    assert result["nutrition_per_100g"] == {
+        "energy_kcal": "430.0",
+        "protein_g": "7.0",
+        "carbohydrates_g": "65.0",
+        "fat_g": "12.0",
+    }
+    assert captured["url"] == "https://world.openfoodfacts.org/cgi/search.pl"
+    assert captured["params"]["search_terms"] == "potato crisps"
+    assert captured["params"]["action"] == "process"
+    assert captured["params"]["json"] == 1
+    assert captured["headers"]["User-Agent"] == "Bitewise/1.0"
+
+    muscle_gain_result = asyncio.run(
+        open_food_facts.find_alternative_product(
+            "potato crisps",
+            "muscle_gain",
+            exclude_name="Scanned Crisps",
+        )
+    )
+    assert muscle_gain_result["product_name"] == "High Energy Crisps"
+    cached_result = asyncio.run(
+        open_food_facts.find_alternative_product(
+            "potato crisps",
+            "fat_loss",
+            exclude_name="Scanned Crisps",
+        )
+    )
+    assert cached_result == result
+    assert captured["calls"] == ["potato crisps", "potato crisps"]
+
+
+def test_open_food_facts_respects_its_search_rate_limit(monkeypatch):
+    import asyncio
+    from collections import deque
+    from time import monotonic
+
+    from app.services import open_food_facts
+
+    monkeypatch.setattr(
+        open_food_facts,
+        "_search_times",
+        deque([monotonic()] * open_food_facts._MAX_SEARCHES_PER_MINUTE),
+    )
+
+    try:
+        asyncio.run(
+            open_food_facts.find_alternative_product(
+                "a distinct test product query",
+                "maintenance",
+            )
+        )
+    except open_food_facts.OpenFoodFactsError as error:
+        assert "temporarily limited" in str(error)
+    else:
+        raise AssertionError("Searches over the provider limit must be blocked.")
+
+
 def test_groq_exposes_safe_request_rejection_reason(monkeypatch):
     import asyncio
 
@@ -501,7 +632,7 @@ def test_usda_search_error_messages_are_actionable():
             self.status_code = status_code
 
     expected_messages = {
-        400: "Try a shorter name",
+        400: "Try the main food name",
         403: "Check USDA_API_KEY",
         429: "rate-limited",
     }
@@ -543,6 +674,39 @@ def test_profile_can_be_created_and_updated(client):
     fetched = client.get("/api/v1/me")
     assert fetched.json()["display_name"] == "Alex"
     assert fetched.json()["daily_calorie_goal"] == 2100
+
+
+def test_optional_onboarding_profile_details_are_saved(client):
+    response = client.put(
+        "/api/v1/me/profile",
+        json={
+            "age": 24,
+            "gender": "prefer_not_to_say",
+            "height_cm": 175,
+            "weight_kg": 70,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["age"] == 24
+    assert response.json()["gender"] == "prefer_not_to_say"
+    assert response.json()["height_cm"] == "175.00"
+    assert response.json()["weight_kg"] == "70.00"
+
+    fetched = client.get("/api/v1/me")
+    assert fetched.json()["age"] == 24
+    assert fetched.json()["gender"] == "prefer_not_to_say"
+    assert fetched.json()["height_cm"] == "175.00"
+    assert fetched.json()["weight_kg"] == "70.00"
+
+
+def test_optional_onboarding_profile_details_validate_ranges(client):
+    response = client.put(
+        "/api/v1/me/profile",
+        json={"age": 12, "gender": "unknown", "height_cm": 300, "weight_kg": 0},
+    )
+
+    assert response.status_code == 422
 
 
 def test_profile_rejects_negative_goals(client):
@@ -595,9 +759,28 @@ def test_product_response_includes_ingredients(client, db_session: Session):
 def test_packaged_scan_is_analyzed_and_persisted(client, monkeypatch):
     from app.api.v1 import routes
 
-    async def fake_explanation(*args, **kwargs):
-        return "Test explanation."
+    async def fake_alternative_product(*args, **kwargs):
+        return {
+            "product_name": "Baked Potato Crisps",
+            "brand": "Example",
+            "image_url": "https://images.openfoodfacts.org/example.jpg",
+            "product_url": "https://world.openfoodfacts.org/product/123",
+            "nutrition_per_100g": {
+                "energy_kcal": "450.0",
+                "protein_g": "8.0",
+                "carbohydrates_g": "70.0",
+                "fat_g": "15.0",
+            },
+        }
 
+    async def fake_explanation(*args, **kwargs):
+        return "Test explanation.", "Try a similar option with less added sugar."
+
+    monkeypatch.setattr(
+        routes.scans,
+        "find_alternative_product",
+        fake_alternative_product,
+    )
     monkeypatch.setattr(
         routes.scans,
         "explain_packaged_label",
@@ -624,6 +807,15 @@ def test_packaged_scan_is_analyzed_and_persisted(client, monkeypatch):
     assert result["product"]["carbohydrates_g"] is None
     assert result["goal_insight"]
     assert result["llm_explanation"] == "Test explanation."
+    assert result["goal_alternative"] == (
+        "Try a similar option with less added sugar."
+    )
+    assert result["alternative_product"]["product_name"] == "Baked Potato Crisps"
+    assert result["alternative_product"]["nutrition_per_100g"]["protein_g"] == (
+        "8.0"
+    )
+    assert result["alternative_product_notice"] is None
+    assert result["analysis_notice"] is None
     assert {finding["category"] for finding in result["findings"]} == {
         "declared_allergen",
         "ingredient_fact",
@@ -639,6 +831,112 @@ def test_packaged_scan_is_analyzed_and_persisted(client, monkeypatch):
     fetched = client.get(f"/api/v1/scans/{result['scan_id']}")
     assert fetched.status_code == 200
     assert fetched.json()["product"]["ingredients"] == ["Oats", "peanuts", "sugar"]
+    assert fetched.json()["alternative_product"]["product_name"] == (
+        "Baked Potato Crisps"
+    )
+
+
+def test_packaged_scan_is_saved_when_groq_explanation_fails(client, monkeypatch):
+    from app.api.v1 import routes
+
+    async def fake_alternative_product(*args, **kwargs):
+        return {
+            "product_name": "Lower Calorie Potato Crisps",
+            "brand": "Example",
+            "image_url": "https://images.openfoodfacts.org/example.jpg",
+            "product_url": "https://world.openfoodfacts.org/product/456",
+            "nutrition_per_100g": {
+                "energy_kcal": "410.0",
+                "protein_g": "7.0",
+                "carbohydrates_g": "68.0",
+                "fat_g": "12.0",
+            },
+        }
+
+    client.put("/api/v1/me/profile", json={"goal": "fat_loss"})
+
+    async def fail_explanation(*args, **kwargs):
+        raise routes.scans.GroqServiceError(
+            "Groq rejected the request: Failed to generate JSON."
+        )
+
+    monkeypatch.setattr(
+        routes.scans,
+        "explain_packaged_label",
+        fail_explanation,
+    )
+    monkeypatch.setattr(
+        routes.scans,
+        "find_alternative_product",
+        fake_alternative_product,
+    )
+    response = client.post(
+        "/api/v1/scans/packaged",
+        json={
+            "product_name": "Oat & Peanut Bar",
+            "serving_size_g": 40,
+            "nutrition_basis": "per_serving",
+            "energy_kcal": 180,
+            "protein_g": 6,
+            "ingredients": ["Oats", "peanuts", "sugar"],
+        },
+    )
+
+    assert response.status_code == 201
+    result = response.json()
+    assert result["product"]["energy_kcal"] == "180"
+    assert result["goal_insight"]
+    assert result["llm_explanation"] is None
+    assert "fat-loss goal" in result["goal_alternative"]
+    assert "fewer calories" in result["goal_alternative"]
+    assert "AI explanation was unavailable" in result["analysis_notice"]
+    assert result["alternative_product"]["product_name"] == (
+        "Lower Calorie Potato Crisps"
+    )
+
+    fetched = client.get(f"/api/v1/scans/{result['scan_id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["goal_alternative"] == result["goal_alternative"]
+    assert fetched.json()["analysis_notice"] == result["analysis_notice"]
+
+
+def test_packaged_scan_stays_available_when_product_catalog_is_unavailable(
+    client, monkeypatch
+):
+    from app.api.v1 import routes
+
+    async def fake_explanation(*args, **kwargs):
+        return "Test explanation.", "Compare similar products using their labels."
+
+    async def fail_product_lookup(*args, **kwargs):
+        raise routes.scans.OpenFoodFactsError("Catalog search timed out.")
+
+    monkeypatch.setattr(
+        routes.scans,
+        "explain_packaged_label",
+        fake_explanation,
+    )
+    monkeypatch.setattr(
+        routes.scans,
+        "find_alternative_product",
+        fail_product_lookup,
+    )
+    response = client.post(
+        "/api/v1/scans/packaged",
+        json={
+            "product_name": "Example Crisps",
+            "serving_size_g": 30,
+            "nutrition_basis": "per_serving",
+            "energy_kcal": 150,
+            "ingredients": ["potato", "oil"],
+        },
+    )
+
+    assert response.status_code == 201
+    result = response.json()
+    assert result["alternative_product"] is None
+    assert "No matching product" in result["alternative_product_notice"]
+    assert result["goal_alternative"]
 
 
 def test_packaged_extraction_uses_uploaded_photos(client, monkeypatch):
@@ -755,10 +1053,32 @@ def test_meal_confirm_uses_selected_usda_food_and_confirmed_portion(
         }
 
     async def fake_explanation(*args, **kwargs):
-        return "Test meal explanation."
+        return (
+            "Test meal explanation.",
+            "Add a protein-rich side that suits your goal.",
+        )
+
+    async def fake_alternative_product(*args, **kwargs):
+        return {
+            "product_name": "High Protein Lentil Snack",
+            "brand": "Example",
+            "image_url": "https://images.openfoodfacts.org/example.jpg",
+            "product_url": "https://world.openfoodfacts.org/product/789",
+            "nutrition_per_100g": {
+                "energy_kcal": "370.0",
+                "protein_g": "18.0",
+                "carbohydrates_g": "52.0",
+                "fat_g": "9.0",
+            },
+        }
 
     monkeypatch.setattr(meals, "get_food_nutrition", fake_food)
     monkeypatch.setattr(meals, "explain_meal", fake_explanation)
+    monkeypatch.setattr(
+        meals,
+        "find_alternative_product",
+        fake_alternative_product,
+    )
     response = client.post(
         "/api/v1/scans/meals/confirm",
         json={
@@ -789,6 +1109,12 @@ def test_meal_confirm_uses_selected_usda_food_and_confirmed_portion(
         "USDA FoodData Central (SR Legacy)"
     )
     assert result["goal_explanation"] == "Test meal explanation."
+    assert result["alternative_guidance"] == (
+        "Add a protein-rich side that suits your goal."
+    )
+    assert result["alternative_product"]["product_name"] == (
+        "High Protein Lentil Snack"
+    )
 
     fetched = client.get(f"/api/v1/scans/meals/{result['scan_id']}")
     assert fetched.status_code == 200
@@ -802,6 +1128,79 @@ def test_meal_confirm_uses_selected_usda_food_and_confirmed_portion(
     assert diary.json()["date"] == result["created_at"][:10]
     assert len(diary.json()["meals"]) == 1
     assert diary.json()["meals"][0]["meal_type"] == "lunch"
+
+
+def test_meal_confirm_saves_goal_alternative_when_groq_fails(client, monkeypatch):
+    from app.api.v1.routes import meals
+
+    client.put("/api/v1/me/profile", json={"goal": "muscle_gain"})
+
+    async def fake_food(fdc_id):
+        return {
+            "fdc_id": fdc_id,
+            "description": "Rice, white, cooked",
+            "data_type": "SR Legacy",
+            "nutrition_per_100g": {
+                "energy_kcal": 130,
+                "protein_g": 2.7,
+                "carbohydrates_g": 28.2,
+                "total_fat_g": 0.3,
+                "sodium_mg": 1,
+            },
+        }
+
+    async def fail_explanation(*args, **kwargs):
+        raise meals.GroqServiceError("Groq could not generate JSON.")
+
+    async def fake_alternative_product(*args, **kwargs):
+        return {
+            "product_name": "Protein Yogurt",
+            "brand": "Example",
+            "image_url": "https://images.openfoodfacts.org/example.jpg",
+            "product_url": "https://world.openfoodfacts.org/product/012",
+            "nutrition_per_100g": {
+                "energy_kcal": "70.0",
+                "protein_g": "10.0",
+                "carbohydrates_g": "5.0",
+                "fat_g": "1.0",
+            },
+        }
+
+    monkeypatch.setattr(meals, "get_food_nutrition", fake_food)
+    monkeypatch.setattr(meals, "explain_meal", fail_explanation)
+    monkeypatch.setattr(
+        meals,
+        "find_alternative_product",
+        fake_alternative_product,
+    )
+    response = client.post(
+        "/api/v1/scans/meals/confirm",
+        json={
+            "meal_name": "Rice",
+            "meal_type": "lunch",
+            "components": [
+                {
+                    "fdc_id": 123,
+                    "food_name": "Cooked white rice",
+                    "portion_g": 150,
+                    "ingredients": ["rice", "water"],
+                    "cooking_method": "boiled",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 201
+    result = response.json()
+    assert result["nutrition_totals"]["energy_kcal"] == "195.0"
+    assert "AI explanation was unavailable" in result["goal_explanation"]
+    assert "muscle-gain goal" in result["alternative_guidance"]
+    assert "protein-rich side" in result["alternative_guidance"]
+    assert result["alternative_product"]["product_name"] == "Protein Yogurt"
+
+    fetched = client.get(f"/api/v1/scans/meals/{result['scan_id']}")
+    assert fetched.status_code == 200
+    assert fetched.json()["alternative_guidance"] == result["alternative_guidance"]
 
 
 def test_meal_confirm_rejects_inconsistent_piece_weight(client):

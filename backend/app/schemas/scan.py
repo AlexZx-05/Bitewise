@@ -97,6 +97,14 @@ class ScanFindingRead(BaseModel):
     details: Optional[str]
 
 
+class AlternativeProductRead(BaseModel):
+    product_name: str
+    brand: Optional[str] = None
+    image_url: str
+    product_url: Optional[str] = None
+    nutrition_per_100g: dict[str, Decimal]
+
+
 class PackagedScanRead(BaseModel):
     scan_id: UUID
     status: str
@@ -105,6 +113,10 @@ class PackagedScanRead(BaseModel):
     findings: list[ScanFindingRead]
     goal_insight: str
     llm_explanation: Optional[str] = None
+    goal_alternative: Optional[str] = None
+    analysis_notice: Optional[str] = None
+    alternative_product: Optional[AlternativeProductRead] = None
+    alternative_product_notice: Optional[str] = None
 
 
 class NutritionExtraction(BaseModel):
