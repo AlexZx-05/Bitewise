@@ -537,10 +537,8 @@ May contain peanuts
     await tester.tap(find.text('Home-cooked meal'));
     await tester.pumpAndSettle();
 
-    expect(
-      find.text('PHOTO  →  CONFIRM  →  NUTRITION ESTIMATE'),
-      findsOneWidget,
-    );
+    expect(find.text('STEP 1 OF 2  ·  ADD A MEAL PHOTO'), findsOneWidget);
+    expect(find.text('Capture your\nhome-cooked meal'), findsOneWidget);
     expect(find.text('Choose photo'), findsOneWidget);
     expect(find.text('Take photo'), findsOneWidget);
     expect(find.text('MEAL TYPE'), findsOneWidget);
